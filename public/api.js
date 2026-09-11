@@ -1,35 +1,45 @@
-import { getAccessToken } from './auth.js';
+import { getAccessToken, getSessionVersion, assertSession, refreshSession, logout } from './auth.js';
 
-// Toda comunicação com o backend fica aqui.
-// Depois, quando o frontend estiver na Vercel, trocaremos esta URL pela API do Render.
 const API_URL = '/api';
-
 export async function request(path = '/state', method = 'GET', data) {
-  const token = getAccessToken();
-
-  const headers = {};
-
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
+  const version = getSessionVersion();
+  async function send() {
+    assertSession(version);
+    const token = getAccessToken();
+    if (!token) {
+      logout();
+      throw Object.assign(new Error('Entre para acessar suas finanças.'), { status: 401 });
+    }
+    const response = await fetch(API_URL + path, {
+      method,
+      cache: 'no-store',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        ...(data === undefined ? {} : { 'Content-Type': 'application/json' })
+      },
+      body: data === undefined ? undefined : JSON.stringify(data)
+    });
+    assertSession(version);
+    return { response, token };
   }
 
-  if (data !== undefined) {
-    headers['Content-Type'] = 'application/json';
+  let { response, token } = await send();
+  if (response.status === 401) {
+    if (getAccessToken() === token) await refreshSession();
+    assertSession(version);
+    ({ response } = await send());
+  }
+  if (response.status === 401) {
+    logout();
+    throw Object.assign(new Error('Sessão expirada. Entre novamente.'), { status: 401 });
   }
 
-  const response = await fetch(API_URL + path, {
-    method,
-    headers,
-    body: data === undefined ? undefined : JSON.stringify(data)
-  });
-
-  const result = await response.json();
-
+  let result;
+  try { result = await response.json(); }
+  catch { throw new Error('Resposta inválida do servidor. Tente novamente.'); }
+  assertSession(version);
   if (!response.ok) {
-    throw new Error(
-      result.error || 'Não foi possível concluir a operação.'
-    );
+    throw Object.assign(new Error(result.error || 'Não foi possível concluir a operação.'), { status: response.status });
   }
-
   return result;
 }

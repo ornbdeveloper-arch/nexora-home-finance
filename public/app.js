@@ -1,5 +1,5 @@
 import { request } from './api.js';
-import { login, isAuthenticated } from './auth.js';
+import { login, logout, isAuthenticated, getUserId } from './auth.js';
 import { money, toCents, sum, totals } from './finance.js';
 
 // 1. Estado da interface. Os dados reais vêm sempre do servidor.
@@ -116,7 +116,7 @@ function renderCategories() {
   return `<section class="panel" style="margin-bottom:24px"><h2>Nova categoria</h2><form id="category-form" class="inline-form"><label>Nome<input name="name" placeholder="Ex.: Pets" maxlength="40" required></label><label class="color-field">Cor<input name="color" type="color" value="#5277cf"></label><button class="primary">Adicionar categoria</button></form><p class="muted" style="font-size:.81rem">As categorias ficam disponíveis em receitas, despesas e orçamentos.</p></section><div class="category-grid">${state.categories.map(c => `<article class="panel category-item"><i class="color-dot" style="background:${c.color}"></i><strong>${escape(c.name)}</strong><small>${state.transactions.filter(t => t.category === c.id).length} registros</small></article>`).join('')}</div>`;
 }
 function renderSettings() {
-  return `<div class="settings-grid"><section class="panel">${icon('download')}<h2>Backup completo</h2><p>Baixe todos os lançamentos, categorias e orçamentos em um arquivo JSON. Guarde uma cópia fora deste computador.</p><button class="primary" data-action="backup">${icon('download')} Baixar backup</button></section><section class="panel">${icon('upload')}<h2>Restaurar seus dados</h2><p>Recupere um backup criado pelo Nexora. A restauração substitui os dados atuais; você poderá revisar a quantidade de registros antes de confirmar.</p><button class="secondary" data-action="restore">${icon('upload')} Selecionar backup</button><input type="file" id="backup-file" accept=".json,application/json" hidden></section><section class="panel">${icon('list')}<h2>Levar para a planilha</h2><p>Exporte os lançamentos do mês selecionado em CSV, compatível com Excel e outras planilhas. Na tela Lançamentos, a exportação respeita seus filtros.</p><button class="secondary" data-action="csv">Exportar ${monthName(month)}</button></section><section class="panel">${icon('leaf')}<h2>Explore sem alterar seus dados</h2><p>Veja um exemplo de finanças organizadas. A demonstração usa dados fictícios temporários e mantém seus registros reais separados.</p><button class="secondary" data-action="demo">Explorar demonstração ↗</button></section></div><div class="panel settings-note"><strong>Onde seus dados ficam?</strong><p>Os dados reais ficam salvos no servidor local, neste computador. Esta versão é pessoal e não possui login ou sincronização entre servidores. Faça backups regularmente. A hospedagem e o banco definitivo serão configurados depois.</p><p class="muted">${state.transactions.length} lançamentos · ${state.categories.length} categorias · ${state.budgets.length} orçamentos</p></div>`;
+  return `<div class="settings-grid"><section class="panel">${icon('download')}<h2>Backup completo</h2><p>Baixe todos os lançamentos, categorias e orçamentos em um arquivo JSON. Guarde uma cópia fora deste computador.</p><button class="primary" data-action="backup">${icon('download')} Baixar backup</button></section><section class="panel">${icon('upload')}<h2>Restaurar seus dados</h2><p>Recupere um backup criado pelo Nexora. A restauração substitui os dados atuais; você poderá revisar a quantidade de registros antes de confirmar.</p><button class="secondary" data-action="restore">${icon('upload')} Selecionar backup</button><input type="file" id="backup-file" accept=".json,application/json" hidden></section><section class="panel">${icon('list')}<h2>Levar para a planilha</h2><p>Exporte os lançamentos do mês selecionado em CSV, compatível com Excel e outras planilhas. Na tela Lançamentos, a exportação respeita seus filtros.</p><button class="secondary" data-action="csv">Exportar ${monthName(month)}</button></section><section class="panel">${icon('leaf')}<h2>Explore sem alterar seus dados</h2><p>Veja um exemplo de finanças organizadas. A demonstração usa dados fictícios temporários e mantém seus registros reais separados.</p><button class="secondary" data-action="demo">Explorar demonstração ↗</button></section></div><div class="panel settings-note"><strong>Onde seus dados ficam?</strong><p>Seus registros ficam protegidos no banco de dados e vinculados exclusivamente à sua conta. Faça backups regularmente.</p><p class="muted">${state.transactions.length} lançamentos · ${state.categories.length} categorias · ${state.budgets.length} orçamentos</p></div>`;
 }
 function render() {
   page = Object.hasOwn(titles, location.hash.slice(1)) ? location.hash.slice(1) : 'overview';
@@ -254,15 +254,39 @@ $('#page-content').addEventListener('click', async event => {
 
 const loginDialog = $('#login-dialog');
 const loginForm = $('#login-form');
+const logoutButton = $('#logout-button');
+const loggedUser = $('#logged-user');
+loginDialog.addEventListener('cancel', event => event.preventDefault());
+loginDialog.addEventListener('close', () => {
+  if (!isAuthenticated()) queueMicrotask(() => loginDialog.showModal());
+});
+
+function updateLoggedUser() {
+  const userId = getUserId();
+  if (!userId) {
+    loggedUser.textContent = '';
+    loggedUser.title = '';
+    return;
+  }
+  loggedUser.textContent = `Usuário: ${userId.slice(0, 8)}…${userId.slice(-4)}`;
+  loggedUser.title = userId;
+}
+
+function showLogin(message = '') {
+  state = null;
+  realState = null;
+  demo = false;
+  updateLoggedUser();
+  $('#demo-banner').hidden = true;
+  $('#page-content').innerHTML = '<div class="panel empty">Faça login para acessar suas finanças.</div>';
+  loginForm.querySelector('.form-error').textContent = message;
+  if (!loginDialog.open) loginDialog.showModal();
+}
 
 async function loadApplication() {
-  try {
-    state = await request();
-    render();
-    return true;
-  } catch {
-    return false;
-  }
+  state = await request();
+  updateLoggedUser();
+  render();
 }
 
 loginForm.addEventListener('submit', async event => {
@@ -282,12 +306,7 @@ loginForm.addEventListener('submit', async event => {
       formData.get('password')
     );
 
-    const loaded = await loadApplication();
-
-    if (!loaded) {
-      throw new Error('Não foi possível carregar suas finanças.');
-    }
-
+    await loadApplication();
     loginDialog.close();
     loginForm.reset();
   } catch (error) {
@@ -297,14 +316,26 @@ loginForm.addEventListener('submit', async event => {
   }
 });
 
-if (isAuthenticated()) {
-  const loaded = await loadApplication();
+logoutButton.addEventListener('click', () => {
+  logout();
+  showLogin();
+  loginForm.elements.email.focus();
+});
 
-  if (!loaded) {
-    loginDialog.showModal();
-  }
+window.addEventListener('nexora:logout', () => {
+  if (!isAuthenticated()) showLogin('Sua sessão terminou. Entre novamente.');
+});
+window.addEventListener('nexora:session-change', () => {
+  if (!isAuthenticated()) showLogin();
+  else loadApplication().catch(() => showLogin('Não foi possível validar a sessão. Entre novamente.'));
+});
+
+updateLoggedUser();
+if (isAuthenticated()) {
+  try { await loadApplication(); }
+  catch (error) { showLogin(error.message); }
 } else {
-  loginDialog.showModal();
+  showLogin();
 }
 
 // Integração opcional e somente leitura; não é necessária para usar a aplicação.

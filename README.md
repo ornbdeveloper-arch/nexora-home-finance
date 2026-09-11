@@ -1,16 +1,16 @@
 # Nexora — finanças pessoais
 
-Uma aplicação pessoal para substituir o controle financeiro em planilha. Escrita em **HTML, CSS e JavaScript**, sem React, frameworks, bibliotecas externas, serviços de nuvem ou etapa de compilação.
+Uma aplicação financeira multiusuário escrita em **HTML, CSS e JavaScript**, sem React, frameworks ou dependências externas. Usa Supabase para autenticação e banco de dados e roda como um Web Service no Render.
 
 ## Executar
 
-Requisito: **Node.js 22 ou mais recente**. No terminal desta pasta:
+Requisito: **Node.js 22 ou mais recente**. Copie `.env.example` para `.env`, preencha as chaves do seu projeto Supabase e execute:
 
 ```sh
-npm start
+npm run dev
 ```
 
-Abra **http://127.0.0.1:3000**. Não precisa executar `npm install`: são usados apenas recursos nativos. Deixe o terminal aberto durante o uso. Para parar, pressione `Ctrl+C`. Execute `npm start` novamente quando quiser voltar. Não abra `index.html` diretamente: a interface precisa conversar com o servidor.
+Abra **http://127.0.0.1:3000**. Não precisa executar `npm install`. O comando `npm start` é usado no Render, onde as variáveis são definidas no painel. Nunca envie `.env` ao Git. Não abra `index.html` diretamente.
 
 ## Usar
 
@@ -40,33 +40,27 @@ Leia os arquivos nesta ordem:
 | `public/api.js` | `fetch`, JSON, requisições e erros |
 | `server/server.js` | HTTP e rotas, usando módulos nativos do Node |
 | `server/domain.js` | Validação e regras de negócio |
-| `server/repository.js` | Persistência isolada; ponto de troca pelo futuro banco |
+| `server/repository.js` | Persistência individual por usuário no Supabase |
+| `public/auth.js` | Login, sessão, renovação de token e logout |
 | `tests/` | Testes de cálculos e integração com a API |
 
 O caminho de um cadastro: formulário → `app.js` → `api.js` → rota HTTP → validação → repositório → resposta JSON → atualização da tela.
 
 `app.js` tem quatro blocos comentados: estado, renderização, alterações e eventos. Textos do usuário passam por escape antes de entrar no HTML. A validação ocorre no formulário e no servidor.
 
-## Dados e limites
+## Supabase e isolamento entre usuários
 
-O armazenamento inicial é **um arquivo JSON no servidor**, não um banco definitivo. `data/finance.json` é criado no primeiro salvamento. A escrita usa arquivo temporário e substituição; `data/finance.json.previous` guarda a versão imediatamente anterior. Essa proteção adicional **não substitui backups periódicos**. Não usamos `localStorage` para os dados financeiros.
+Execute [supabase/schema.sql](supabase/schema.sql) uma vez no SQL Editor do projeto. A tabela usa `user_id` como chave primária e referência a `auth.users`. O navegador autentica somente com a publishable key. A secret key permanece no servidor, que valida o token antes de toda rota `/api` e usa o `user.id` validado para ler e gravar.
 
-Somente **um processo Node** deve escrever nessa pasta. Não serve para múltiplas instâncias concorrentes, disco efêmero de funções serverless ou uso multiusuário. Não há conexão bancária, recorrências, parcelamentos, contas separadas, autenticação ou criptografia do arquivo. Esta versão é para uso pessoal local.
+Os dados financeiros não ficam no `localStorage`; somente access token, refresh token e UID da sessão são guardados ali. Cada linha financeira pertence a um usuário. O repositório não mantém cache compartilhado e usa atualização condicional para evitar que requisições concorrentes apaguem alterações umas das outras.
 
-Não edite o JSON enquanto o servidor estiver aberto: ele mantém o estado em memória. Se o arquivo estiver inválido na inicialização, o servidor falha sem apagar seus dados. Guarde uma cópia do arquivo problemático antes de recuperá-lo de um backup.
+O cadastro público deve permanecer desabilitado no Supabase. Crie usuários manualmente em Authentication > Users. A aplicação oferece apenas login e logout.
 
-## Hospedagem e banco serão escolhidos depois
+## Render
 
-Nenhuma integração com Vercel, Supabase, Render ou outro provedor foi adicionada. O frontend é estático e a API usa HTTP/JSON. `PORT`, `HOST` e `DATA_DIR` são variáveis de ambiente opcionais; o Node não carrega `.env` automaticamente.
+Crie um Web Service com o comando `npm start`. Configure no painel `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `SUPABASE_PUBLISHABLE_KEY` e `FRONTEND_ORIGIN` (a URL HTTPS exata do serviço, sem barra final). O Render fornece `PORT`; o código usa `0.0.0.0` automaticamente quando `RENDER` está presente. `NEXORA_ALLOWED_USER_ID` não é usado.
 
-Antes de publicar:
-
-- Adicione autenticação, autorização e HTTPS para proteger os dados financeiros.
-- Substitua `server/repository.js` por um adaptador do banco escolhido e migre pelo backup JSON, ou use servidor único com disco persistente.
-- Para separar domínios, ajuste `API_URL` em `public/api.js`, `connect-src`, CORS e a validação de origem para uma lista explícita de domínios. Hoje frontend e API compartilham endereço.
-- O servidor inicia em `127.0.0.1`. `HOST=0.0.0.0` abre acesso de rede e só deve ser configurado após proteger a aplicação.
-
-Portabilidade significa separar responsabilidades: um host de funções exige adaptar a entrada HTTP e usar armazenamento externo. Nada foi publicado e nenhum serviço foi criado.
+Não coloque a secret key em arquivos públicos nem em variáveis com prefixos de frontend. Como frontend e API são servidos juntos, `API_URL` continua relativo como `/api`.
 
 ## API
 

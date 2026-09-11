@@ -1,5 +1,21 @@
 # Validação do Nexora
 
+## Validação multiusuário — 11/09/2026
+
+- Autenticação obrigatória em todas as rotas `/api`; token ausente e inválido retornam 401.
+- Teste A → B → A confirmou isolamento dos lançamentos por `user_id` derivado do token validado.
+- Criação inicial, CRUD completo, backup e restauração foram exercitados em um Supabase simulado localmente.
+- Duas gravações concorrentes foram preservadas por atualização condicional e repetição limitada.
+- O refresh token é tentado uma vez; a requisição original é repetida uma vez e falhas limpam a sessão.
+- Logout apaga os três itens de sessão e a interface financeira da memória.
+- `auth-config` expõe somente URL e publishable key; a secret key permanece no servidor.
+- `/auth.js` é servido como JavaScript. Todos os IDs usados no login existem no HTML.
+- Modal sem sessão abre automaticamente e continua aberto ao pressionar Esc.
+- Supabase real consultado sem alterar dados: tabela respondeu com `user_id`, `data` e `updated_at`; os 2 estados existentes passaram por `validateBackup()`; consulta anônima retornou zero linhas; cadastro público confirmado como desabilitado.
+- Seis testes automatizados aprovados e nenhum erro ou aviso no console na tela de login.
+
+Os testes multiusuário não acessam o projeto Supabase real nem alteram dados existentes. As credenciais de duas pessoas devem ser usadas manualmente apenas após criar os usuários no painel.
+
 Verificação realizada em 11/09/2026. Sem publicação externa e sem dados financeiros reais.
 
 ## Resultado

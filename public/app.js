@@ -1,4 +1,5 @@
 import { request } from './api.js';
+import { login, isAuthenticated } from './auth.js';
 import { money, toCents, sum, totals } from './finance.js';
 
 // 1. Estado da interface. Os dados reais vêm sempre do servidor.
@@ -251,8 +252,60 @@ $('#page-content').addEventListener('click', async event => {
   } catch (error) { toast(error.message); } finally { button.disabled = false; }
 });
 
-try { state = await request(); render(); }
-catch { $('#page-content').innerHTML = `<section class="panel">${empty('Não foi possível conectar', 'Verifique se o servidor está em execução e tente novamente.', '<button class="primary" data-action="retry">Tentar novamente</button>')}</section>`; }
+const loginDialog = $('#login-dialog');
+const loginForm = $('#login-form');
+
+async function loadApplication() {
+  try {
+    state = await request();
+    render();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+loginForm.addEventListener('submit', async event => {
+  event.preventDefault();
+
+  const button = loginForm.querySelector('button[type="submit"]');
+  const errorElement = loginForm.querySelector('.form-error');
+
+  button.disabled = true;
+  errorElement.textContent = '';
+
+  try {
+    const formData = new FormData(loginForm);
+
+    await login(
+      formData.get('email'),
+      formData.get('password')
+    );
+
+    const loaded = await loadApplication();
+
+    if (!loaded) {
+      throw new Error('Não foi possível carregar suas finanças.');
+    }
+
+    loginDialog.close();
+    loginForm.reset();
+  } catch (error) {
+    errorElement.textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+});
+
+if (isAuthenticated()) {
+  const loaded = await loadApplication();
+
+  if (!loaded) {
+    loginDialog.showModal();
+  }
+} else {
+  loginDialog.showModal();
+}
 
 // Integração opcional e somente leitura; não é necessária para usar a aplicação.
 if (document.modelContext?.registerTool) {

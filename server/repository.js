@@ -1,19 +1,87 @@
-import { mkdirSync, existsSync, readFileSync, writeFileSync, renameSync, copyFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
 import { emptyState, validateBackup } from './domain.js';
 
-// Troque apenas este módulo ao escolher um banco. O navegador nunca acessa o arquivo.
-// Escritas síncronas + rename evitam concorrência dentro deste único processo Node.
-const directory = resolve(process.env.DATA_DIR || 'data');
-mkdirSync(directory, { recursive: true });
-const file = join(directory, 'finance.json');
-let state = existsSync(file) ? validateBackup(JSON.parse(readFileSync(file, 'utf8'))) : emptyState();
-export function readState() { return structuredClone(state); }
-export function saveState(next) {
+const supabaseUrl = process.env.SUPABASE_URL;
+const secretKey = process.env.SUPABASE_SECRET_KEY;
+
+if (!supabaseUrl || !secretKey) {
+  throw new Error(
+    'SUPABASE_URL e SUPABASE_SECRET_KEY precisam estar configuradas.'
+  );
+}
+
+const endpoint = `${supabaseUrl}/rest/v1/nexora_state`;
+
+const headers = {
+  apikey: secretKey,
+  Authorization: `Bearer ${secretKey}`,
+  'Content-Type': 'application/json'
+};
+
+async function loadState() {
+  const response = await fetch(
+    `${endpoint}?id=eq.1&select=data`,
+    {
+      headers
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      `Não foi possível carregar os dados do Supabase: ${response.status} ${await response.text()}`
+    );
+  }
+
+  const rows = await response.json();
+
+  if (rows.length === 0) {
+    const initialState = emptyState();
+
+    await persistState(initialState);
+
+    return initialState;
+  }
+
+  return validateBackup(rows[0].data);
+}
+
+async function persistState(next) {
   const validated = validateBackup(next);
-  writeFileSync(file + '.tmp', JSON.stringify(validated, null, 2), { mode: 0o600 });
-  if (existsSync(file)) copyFileSync(file, file + '.previous');
-  renameSync(file + '.tmp', file);
+
+  const response = await fetch(
+    `${endpoint}?on_conflict=id`,
+    {
+      method: 'POST',
+      headers: {
+        ...headers,
+        Prefer: 'resolution=merge-duplicates'
+      },
+      body: JSON.stringify({
+        id: 1,
+        data: validated,
+        updated_at: new Date().toISOString()
+      })
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      `Não foi possível salvar os dados no Supabase: ${response.status} ${await response.text()}`
+    );
+  }
+
+  return validated;
+}
+
+let state = await loadState();
+
+export function readState() {
+  return structuredClone(state);
+}
+
+export async function saveState(next) {
+  const validated = await persistState(next);
+
   state = validated;
+
   return readState();
 }

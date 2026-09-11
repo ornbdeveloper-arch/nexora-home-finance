@@ -4,6 +4,11 @@
   "private": true,
   "type": "module",
   "description": "Gestor financeiro em HTML, CSS e JavaScript, sem dependências",
-  "scripts": { "start": "node server/server.js", "test": "node --test tests/*.test.js" },
-  "engines": { "node": ">=22" }
+  "scripts": {
+    "start": "node --env-file=.env server/server.js",
+    "test": "node --test tests/*.test.js"
+  },
+  "engines": {
+    "node": ">=22"
+  }
 }

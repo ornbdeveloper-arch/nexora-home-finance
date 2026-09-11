@@ -6,6 +6,46 @@
   <title>Nexora · Finanças pessoais</title><link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/styles.css">
 </head>
 <body>
+  <dialog id="login-dialog" class="login-dialog">
+  <form id="login-form">
+    <div class="login-brand">
+      <img src="/favicon.svg" alt="" width="52" height="52">
+      <strong>nexora<span>•</span></strong>
+    </div>
+
+    <div class="login-heading">
+      <p class="eyebrow">SEU ESPAÇO FINANCEIRO</p>
+      <h1>Entrar no Nexora</h1>
+      <p class="muted">Acesse suas finanças com segurança.</p>
+    </div>
+
+    <label>
+      E-mail
+      <input
+        type="email"
+        name="email"
+        autocomplete="email"
+        required
+      >
+    </label>
+
+    <label>
+      Senha
+      <input
+        type="password"
+        name="password"
+        autocomplete="current-password"
+        required
+      >
+    </label>
+
+    <p class="form-error" role="alert"></p>
+
+    <button class="primary" type="submit">
+      Entrar
+    </button>
+  </form>
+</dialog>
   <a class="skip" href="#content">Pular para o conteúdo</a>
   <aside class="sidebar">
     <a class="brand" href="#overview"><img src="/favicon.svg" alt="" width="38" height="38">nexora<span>•</span></a>

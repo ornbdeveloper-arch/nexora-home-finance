@@ -1680,4 +1680,71 @@ th {
     }
   }
 }
+.login-dialog {
+  width:min(430px, calc(100% - 32px));
+  border:0;
+  border-radius:18px;
+  padding:0;
+  box-shadow:0 24px 80px rgba(22, 62, 52, .22);
+}
+
+.login-dialog::backdrop {
+  background:rgba(16, 35, 29, .62);
+  backdrop-filter:blur(5px);
+}
+
+.login-dialog form {
+  padding:38px;
+  display:grid;
+  gap:22px;
+  background:white;
+}
+
+.login-brand {
+  display:flex;
+  align-items:center;
+  gap:11px;
+  font-size:1.8rem;
+}
+
+.login-brand strong {
+  letter-spacing:-1px;
+}
+
+.login-brand span {
+  color:#93b76c;
+}
+
+.login-heading {
+  display:grid;
+  gap:8px;
+}
+
+.login-heading h1 {
+  font-size:1.65rem;
+}
+
+.login-dialog label {
+  display:grid;
+  gap:8px;
+  font-size:.875rem;
+  font-weight:600;
+}
+
+.login-dialog input {
+  width:100%;
+  border:1px solid var(--border);
+  border-radius:9px;
+  padding:13px 14px;
+  background:white;
+  color:var(--text);
+}
+
+.login-dialog .primary {
+  width:100%;
+}
+
+.login-dialog .form-error:empty {
+  display:none;
+}
 

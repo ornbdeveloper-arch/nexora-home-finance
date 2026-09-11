@@ -72,6 +72,8 @@ Valores monetários são inteiros em **centavos**; datas são `YYYY-MM-DD`; mese
 | `GET /api/admin/users` | Listar usuários (somente administrador) |
 | `POST /api/admin/users` | Criar usuário (somente administrador) |
 | `PUT /api/admin/users/:id` | Alterar nome, e-mail ou senha (somente administrador) |
+| `POST /api/admin/users/:id/block` | Bloquear ou desbloquear acesso (somente administrador) |
+| `DELETE /api/admin/users/:id` | Excluir uma conta (somente administrador) |
 | `GET /api/state` | Ler dados |
 | `POST /api/transactions` | Criar lançamento |
 | `PUT /api/transactions/:id` | Editar lançamento |
@@ -81,7 +83,14 @@ Valores monetários são inteiros em **centavos**; datas são `YYYY-MM-DD`; mese
 | `POST /api/categories` | Adicionar categoria |
 | `DELETE /api/categories/:id` | Remover categoria e reatribuir registros a Outros |
 | `POST /api/installments` | Adicionar compra parcelada |
+| `PUT /api/installments/:id` | Editar compra ou atualizar parcelas pagas |
 | `DELETE /api/installments/:id` | Excluir compra parcelada |
+| `POST /api/recurring-expenses` | Adicionar despesa mensal recorrente |
+| `PUT /api/recurring-expenses/:id` | Editar recorrência ou atualizar meses pagos |
+| `DELETE /api/recurring-expenses/:id` | Excluir despesa recorrente |
+| `POST /api/goals` | Criar meta financeira |
+| `PUT /api/goals/:id` | Atualizar progresso ou dados da meta |
+| `DELETE /api/goals/:id` | Excluir meta financeira |
 | `GET /api/backup` | Exportar estado |
 | `POST /api/restore` | Validar e substituir estado |
 

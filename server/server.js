@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { createRepository } from './repository.js';
-import { requireValue, validateTransaction, validateBudget, validateInstallment, validateBackup } from './domain.js';
+import { requireValue, validateTransaction, validateBudget, validateInstallment, validateRecurringExpense, validateGoal, validateBackup } from './domain.js';
 
 const publicDirectory = fileURLToPath(new URL('../public/', import.meta.url));
 const port = Number(process.env.PORT || 3000);
@@ -59,7 +59,7 @@ async function adminCall(path, options = {}) {
   if (!response.ok) throw fail(response.status === 422 ? 400 : response.status, result.msg || result.message || result.error || 'Não foi possível administrar o usuário.');
   return result;
 }
-const cleanAdminUser = user => ({ id: user.id, email: user.email || '', name: publicUser(user).name, createdAt: user.created_at || '', lastSignInAt: user.last_sign_in_at || '', isAdmin: user.app_metadata?.role === 'admin' });
+const cleanAdminUser = user => ({ id: user.id, email: user.email || '', name: publicUser(user).name, createdAt: user.created_at || '', lastSignInAt: user.last_sign_in_at || '', isAdmin: user.app_metadata?.role === 'admin', blocked: Boolean(user.banned_until && Date.parse(user.banned_until) > Date.now()) });
 const assets = {
   '/': ['index.html', 'text/html'], '/index.html': ['index.html', 'text/html'],
   '/styles.css': ['styles.css', 'text/css'], '/app.js': ['app.js', 'text/javascript'],
@@ -139,9 +139,21 @@ const server = createServer(async (request, response) => {
       const updated = await adminCall('/users/' + adminId, { method: 'PUT', body: JSON.stringify(fields) });
       return json(response, 200, cleanAdminUser(updated));
     }
+    const adminAction = url.pathname.match(/^\/api\/admin\/users\/([0-9a-f-]{36})\/block$/i)?.[1];
+    if (adminAction && request.method === 'POST') {
+      requireAdmin(user); requireValue(adminAction !== user.id, 'Você não pode bloquear sua própria conta.'); requireValue(typeof value.blocked === 'boolean', 'Situação inválida.');
+      const updated = await adminCall('/users/' + adminAction, { method: 'PUT', body: JSON.stringify({ ban_duration: value.blocked ? '876000h' : 'none' }) });
+      return json(response, 200, cleanAdminUser(updated));
+    }
+    if (adminId && request.method === 'DELETE') {
+      requireAdmin(user); requireValue(adminId !== user.id, 'Você não pode excluir sua própria conta.');
+      await adminCall('/users/' + adminId, { method: 'DELETE' }); return json(response, 200, { deleted: true });
+    }
     const id = url.pathname.match(/^\/api\/transactions\/([a-zA-Z0-9-]+)$/)?.[1];
     const installmentId = url.pathname.match(/^\/api\/installments\/([a-zA-Z0-9-]+)$/)?.[1];
     const categoryId = url.pathname.match(/^\/api\/categories\/([a-zA-Z0-9-]+)$/)?.[1];
+    const recurringId = url.pathname.match(/^\/api\/recurring-expenses\/([a-zA-Z0-9-]+)$/)?.[1];
+    const goalId = url.pathname.match(/^\/api\/goals\/([a-zA-Z0-9-]+)$/)?.[1];
     const newId = randomUUID();
     const saved = await repository.updateState(user.id, state => {
       if (url.pathname === '/api/transactions' && request.method === 'POST') {
@@ -168,14 +180,30 @@ const server = createServer(async (request, response) => {
         requireValue(state.categories.some(category => category.id === categoryId), 'Categoria não encontrada.');
         state.transactions = state.transactions.map(item => item.category === categoryId ? { ...item, category: 'outros' } : item);
         state.installments = state.installments.map(item => item.category === categoryId ? { ...item, category: 'outros' } : item);
+        state.recurringExpenses = state.recurringExpenses.map(item => item.category === categoryId ? { ...item, category: 'outros' } : item);
         state.budgets = state.budgets.filter(item => item.category !== categoryId);
         state.categories = state.categories.filter(category => category.id !== categoryId);
       } else if (url.pathname === '/api/installments' && request.method === 'POST') {
         state.installments.push({ id: newId, ...validateInstallment(value, state.categories) });
-      } else if (installmentId && request.method === 'DELETE') {
+      } else if (installmentId && ['PUT', 'DELETE'].includes(request.method)) {
         const index = state.installments.findIndex(item => item.id === installmentId);
         if (index === -1) throw fail(404, 'Compra parcelada não encontrada.');
-        state.installments.splice(index, 1);
+        if (request.method === 'DELETE') state.installments.splice(index, 1);
+        else state.installments[index] = { id: installmentId, ...validateInstallment(value, state.categories) };
+      } else if (url.pathname === '/api/recurring-expenses' && request.method === 'POST') {
+        state.recurringExpenses.push({ id: newId, ...validateRecurringExpense(value, state.categories) });
+      } else if (recurringId && ['PUT', 'DELETE'].includes(request.method)) {
+        const index = state.recurringExpenses.findIndex(item => item.id === recurringId);
+        if (index === -1) throw fail(404, 'Despesa recorrente não encontrada.');
+        if (request.method === 'DELETE') state.recurringExpenses.splice(index, 1);
+        else state.recurringExpenses[index] = { id: recurringId, ...validateRecurringExpense(value, state.categories) };
+      } else if (url.pathname === '/api/goals' && request.method === 'POST') {
+        state.goals.push({ id: newId, ...validateGoal(value) });
+      } else if (goalId && ['PUT', 'DELETE'].includes(request.method)) {
+        const index = state.goals.findIndex(item => item.id === goalId);
+        if (index === -1) throw fail(404, 'Meta não encontrada.');
+        if (request.method === 'DELETE') state.goals.splice(index, 1);
+        else state.goals[index] = { id: goalId, ...validateGoal(value) };
       } else if (url.pathname === '/api/restore' && request.method === 'POST') return validateBackup(value);
       else throw fail(404, 'Operação não encontrada.');
       return state;

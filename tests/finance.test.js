@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { toCents, totals } from '../public/finance.js';
-import { emptyState, validateBackup, validateTransaction, validateInstallment, validDate } from '../server/domain.js';
+import { emptyState, validateBackup, validateTransaction, validateInstallment, validateRecurringExpense, validateGoal, validDate } from '../server/domain.js';
 
 test('dinheiro é convertido para centavos sem formatos ambíguos', () => {
   assert.equal(toCents('0,10') + toCents('0,20'), 30);
@@ -37,4 +37,11 @@ test('parcelamentos exigem valor, prazo, vencimento e categoria válidos', () =>
   assert.equal(item.installmentCount, 12);
   assert.throws(() => validateInstallment({ ...item, installmentCount:1 }, state.categories));
   assert.throws(() => validateInstallment({ ...item, dueDay:31 }, state.categories));
+});
+test('recorrências e metas validam período, pagamentos e progresso', () => {
+  const state = emptyState();
+  assert.equal(validateRecurringExpense({ description:'Internet',amount:12000,startMonth:'2026-09',endMonth:'',dueDay:10,category:'outros',paidMonths:['2026-09'] }, state.categories).paidMonths[0], '2026-09');
+  assert.throws(() => validateRecurringExpense({ description:'Internet',amount:12000,startMonth:'2026-09',endMonth:'2026-08',dueDay:10,category:'outros' }, state.categories));
+  assert.equal(validateGoal({ name:'Reserva',targetAmount:100000,currentAmount:25000,targetDate:'2027-09-01' }).currentAmount, 25000);
+  assert.throws(() => validateGoal({ name:'Reserva',targetAmount:0,currentAmount:0,targetDate:'2027-09-01' }));
 });

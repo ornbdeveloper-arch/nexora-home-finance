@@ -10,7 +10,7 @@ export const defaultCategories = [
   { id: 'educacao', name: 'Educação', color: '#779853' },
   { id: 'outros', name: 'Outros', color: '#80908c' }
 ];
-export const emptyState = () => ({ version: 1, transactions: [], budgets: [], installments: [], categories: structuredClone(defaultCategories) });
+export const emptyState = () => ({ version: 1, transactions: [], budgets: [], installments: [], recurringExpenses: [], goals: [], categories: structuredClone(defaultCategories) });
 export function requireValue(condition, message) {
   if (!condition) { const error = new Error(message); error.status = 400; throw error; }
 }
@@ -44,7 +44,29 @@ export function validateInstallment(value, categories) {
   requireValue(typeof value.startMonth === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(value.startMonth), 'Mês inicial inválido.');
   requireValue(Number.isSafeInteger(value.dueDay) && value.dueDay >= 1 && value.dueDay <= 28, 'O vencimento deve ficar entre os dias 1 e 28.');
   requireValue(categories.some(c => c.id === value.category), 'Categoria inválida.');
-  return { description: value.description.trim(), totalAmount: value.totalAmount, installmentCount: value.installmentCount, startMonth: value.startMonth, dueDay: value.dueDay, category: value.category };
+  const paidInstallments = value.paidInstallments || [];
+  requireValue(Array.isArray(paidInstallments) && paidInstallments.every(number => Number.isSafeInteger(number) && number >= 1 && number <= value.installmentCount) && new Set(paidInstallments).size === paidInstallments.length, 'Parcelas pagas inválidas.');
+  return { description: value.description.trim(), totalAmount: value.totalAmount, installmentCount: value.installmentCount, startMonth: value.startMonth, dueDay: value.dueDay, category: value.category, paidInstallments: [...paidInstallments].sort((a, b) => a - b) };
+}
+export function validateRecurringExpense(value, categories) {
+  requireValue(value && typeof value === 'object', 'Despesa recorrente inválida.');
+  requireValue(typeof value.description === 'string' && value.description.trim().length > 0 && value.description.trim().length <= 120, 'Informe uma descrição de até 120 caracteres.');
+  requireValue(Number.isSafeInteger(value.amount) && value.amount > 0 && value.amount <= 100000000000, 'Informe um valor mensal válido.');
+  requireValue(typeof value.startMonth === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(value.startMonth), 'Mês inicial inválido.');
+  requireValue(value.endMonth === '' || value.endMonth === null || (typeof value.endMonth === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(value.endMonth) && value.endMonth >= value.startMonth), 'Mês final inválido.');
+  requireValue(Number.isSafeInteger(value.dueDay) && value.dueDay >= 1 && value.dueDay <= 28, 'O vencimento deve ficar entre os dias 1 e 28.');
+  requireValue(categories.some(c => c.id === value.category), 'Categoria inválida.');
+  const paidMonths = value.paidMonths || [];
+  requireValue(Array.isArray(paidMonths) && paidMonths.every(item => typeof item === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(item)) && new Set(paidMonths).size === paidMonths.length, 'Meses pagos inválidos.');
+  return { description: value.description.trim(), amount: value.amount, startMonth: value.startMonth, endMonth: value.endMonth || '', dueDay: value.dueDay, category: value.category, paidMonths: [...paidMonths].sort() };
+}
+export function validateGoal(value) {
+  requireValue(value && typeof value === 'object', 'Meta inválida.');
+  requireValue(typeof value.name === 'string' && value.name.trim().length > 0 && value.name.trim().length <= 100, 'Informe um nome de até 100 caracteres.');
+  requireValue(Number.isSafeInteger(value.targetAmount) && value.targetAmount > 0 && value.targetAmount <= 100000000000, 'Informe um valor-alvo válido.');
+  requireValue(Number.isSafeInteger(value.currentAmount) && value.currentAmount >= 0 && value.currentAmount <= 100000000000, 'Informe quanto já foi guardado.');
+  requireValue(validDate(value.targetDate), 'Prazo inválido.');
+  return { name: value.name.trim(), targetAmount: value.targetAmount, currentAmount: value.currentAmount, targetDate: value.targetDate };
 }
 export function validateBackup(value) {
   requireValue(value?.version === 1 && Array.isArray(value.transactions) && Array.isArray(value.categories) && Array.isArray(value.budgets), 'Arquivo de backup incompatível.');
@@ -67,6 +89,16 @@ export function validateBackup(value) {
     requireValue(item && typeof item.id === 'string' && /^[a-zA-Z0-9-]{1,80}$/.test(item.id) && !ids.has(item.id), 'Identificador de parcelamento inválido ou duplicado.');
     ids.add(item.id); return { id: item.id, ...validateInstallment(item, categories) };
   });
-  requireValue(installments.length <= 10000, 'Backup excede os limites permitidos.');
-  return { version: 1, categories, transactions, budgets, installments };
+  ids.clear();
+  const recurringExpenses = (value.recurringExpenses || []).map(item => {
+    requireValue(item && typeof item.id === 'string' && /^[a-zA-Z0-9-]{1,80}$/.test(item.id) && !ids.has(item.id), 'Identificador de recorrência inválido ou duplicado.');
+    ids.add(item.id); return { id: item.id, ...validateRecurringExpense(item, categories) };
+  });
+  ids.clear();
+  const goals = (value.goals || []).map(item => {
+    requireValue(item && typeof item.id === 'string' && /^[a-zA-Z0-9-]{1,80}$/.test(item.id) && !ids.has(item.id), 'Identificador de meta inválido ou duplicado.');
+    ids.add(item.id); return { id: item.id, ...validateGoal(item) };
+  });
+  requireValue(installments.length <= 10000 && recurringExpenses.length <= 10000 && goals.length <= 1000, 'Backup excede os limites permitidos.');
+  return { version: 1, categories, transactions, budgets, installments, recurringExpenses, goals };
 }

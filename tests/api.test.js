@@ -33,8 +33,10 @@ async function mockSupabase() {
     }
     if (url.pathname === '/auth/v1/admin/users/' + ids.b && request.method === 'PUT') {
       const chunks = []; for await (const chunk of request) chunks.push(chunk); const value = JSON.parse(Buffer.concat(chunks).toString());
+      if (value.ban_duration) return reply(200, { id: ids.b, email: 'bruno@example.com', user_metadata: {}, app_metadata: {}, banned_until: value.ban_duration === 'none' ? null : '2126-01-01T00:00:00Z' });
       return reply(200, { id: ids.b, email: value.email, user_metadata: value.user_metadata, app_metadata: {}, created_at: '2026-01-02T00:00:00Z' });
     }
+    if (url.pathname === '/auth/v1/admin/users/' + ids.b && request.method === 'DELETE') return reply(200, {});
     if (url.pathname !== '/rest/v1/nexora_state' || request.headers.apikey !== 'sb_secret_test') return reply(403, {});
     const userFilter = url.searchParams.get('user_id');
     const userId = userFilter?.replace('eq.', '');
@@ -112,12 +114,15 @@ test('API exige autenticação e isola todo o CRUD por usuário', async () => {
     assert.equal((await api('/admin/users', 'token-b')).status, 403);
     const users = (await api('/admin/users', 'token-a')).data;
     assert.equal(users.length, 2);
-    assert.deepEqual(Object.keys(users[0]), ['id', 'email', 'name', 'createdAt', 'lastSignInAt', 'isAdmin']);
+    assert.deepEqual(Object.keys(users[0]), ['id', 'email', 'name', 'createdAt', 'lastSignInAt', 'isAdmin', 'blocked']);
     assert.equal((await api('/admin/users', 'token-b', 'POST', { name:'Novo',email:'novo@example.com',password:'12345678' })).status, 403);
     const createdUser = await api('/admin/users', 'token-a', 'POST', { name:'Novo',email:'novo@example.com',password:'12345678' });
     assert.equal(createdUser.status, 201); assert.equal(createdUser.data.name, 'Novo');
     const updatedUser = await api('/admin/users/' + ids.b, 'token-a', 'PUT', { name:'Bruno',email:'novo-bruno@example.com',password:'' });
     assert.equal(updatedUser.data.email, 'novo-bruno@example.com'); assert.equal(updatedUser.data.name, 'Bruno');
+    assert.equal((await api('/admin/users/' + ids.a + '/block', 'token-a', 'POST', { blocked:true })).status, 400);
+    assert.equal((await api('/admin/users/' + ids.b + '/block', 'token-a', 'POST', { blocked:true })).data.blocked, true);
+    assert.equal((await api('/admin/users/' + ids.b, 'token-a', 'DELETE', {})).data.deleted, true);
 
     let a = (await api('/state', 'token-a')).data;
     let b = (await api('/state', 'token-b')).data;
@@ -155,15 +160,30 @@ test('API exige autenticação e isola todo o CRUD por usuário', async () => {
     assert.equal(a.installments[0].description, 'Notebook');
     assert.equal(a.installments[0].installmentCount, 12);
     assert.equal((await api('/state', 'token-b')).data.installments.length, 0);
+    const installmentId = a.installments[0].id;
+    a = (await api('/installments/' + installmentId, 'token-a', 'PUT', { ...a.installments[0], paidInstallments:[1] })).data;
+    assert.deepEqual(a.installments[0].paidInstallments, [1]);
+    a = (await api('/recurring-expenses', 'token-a', 'POST', { description:'Internet',amount:12000,startMonth:'2026-09',endMonth:'',dueDay:12,category:petsId,paidMonths:[] })).data;
+    const recurringId = a.recurringExpenses[0].id;
+    a = (await api('/recurring-expenses/' + recurringId, 'token-a', 'PUT', { ...a.recurringExpenses[0], paidMonths:['2026-09'] })).data;
+    assert.deepEqual(a.recurringExpenses[0].paidMonths, ['2026-09']);
+    a = (await api('/goals', 'token-a', 'POST', { name:'Reserva',targetAmount:100000,currentAmount:10000,targetDate:'2027-09-01' })).data;
+    const goalId = a.goals[0].id;
+    a = (await api('/goals/' + goalId, 'token-a', 'PUT', { ...a.goals[0], currentAmount:20000 })).data;
+    assert.equal(a.goals[0].currentAmount, 20000);
     a = (await api('/categories/' + petsId, 'token-a', 'DELETE', {})).data;
     assert.equal(a.categories.some(item => item.id === petsId), false);
     assert.equal(a.transactions[0].category, 'outros');
     assert.equal(a.installments[0].category, 'outros');
+    assert.equal(a.recurringExpenses[0].category, 'outros');
     assert.equal(a.budgets.some(item => item.category === petsId), false);
     assert.equal((await api('/categories/outros', 'token-a', 'DELETE', {})).status, 400);
-    const installmentId = a.installments[0].id;
     a = (await api('/installments/' + installmentId, 'token-a', 'DELETE', {})).data;
     assert.equal(a.installments.length, 0);
+    a = (await api('/recurring-expenses/' + recurringId, 'token-a', 'DELETE', {})).data;
+    assert.equal(a.recurringExpenses.length, 0);
+    a = (await api('/goals/' + goalId, 'token-a', 'DELETE', {})).data;
+    assert.equal(a.goals.length, 0);
 
     const backup = (await api('/backup', 'token-a')).data;
     a = (await api('/transactions/' + aId, 'token-a', 'DELETE', {})).data;

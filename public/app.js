@@ -4,6 +4,9 @@ import { money, toCents, sum, totals } from './finance.js';
 
 // 1. Estado da interface. Os dados reais vêm sempre do servidor.
 const $ = selector => document.querySelector(selector);
+const THEME_KEY = 'nexora_theme';
+const initialTheme = localStorage.getItem(THEME_KEY) || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+document.documentElement.dataset.theme = initialTheme;
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 let state = null;
 let realState = null;
@@ -18,6 +21,7 @@ const titles = {
   transactions: ['Lançamentos', 'Cada entrada e saída, no seu devido lugar.'],
   budgets: ['Orçamentos', 'Planeje seus gastos e acompanhe seus limites.'],
   installments: ['Parcelamentos', 'Acompanhe compras e dívidas que comprometem os próximos meses.'],
+  goals: ['Metas', 'Transforme planos em valores e prazos que você pode acompanhar.'],
   categories: ['Categorias', 'Organize seu dinheiro de um jeito que faz sentido para você.'],
   admin: ['Usuários', 'Gerencie quem pode acessar o Nexora.'],
   settings: ['Dados e backup', 'Seus registros organizados, suas cópias em segurança.']
@@ -38,7 +42,8 @@ const paths = {
   check: '<path d="m5 12 4 4L19 6"/>',
   download: '<path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/>',
   upload: '<path d="M12 16V3m-5 5 5-5 5 5M4 16v5h16v-5"/>'
-  ,users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>'
+  ,users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
+  target: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/>'
 };
 const icon = name => `<svg viewBox="0 0 24 24" aria-hidden="true">${paths[name] || paths.wallet}</svg>`;
 document.querySelectorAll('[data-icon]').forEach(el => el.innerHTML = icon(el.dataset.icon));
@@ -54,7 +59,9 @@ function installmentAt(item, targetMonth) {
   if (index < 0 || index >= item.installmentCount) return null;
   return Math.floor(item.totalAmount / item.installmentCount) + (index < item.totalAmount % item.installmentCount ? 1 : 0);
 }
-const installmentsInMonth = (targetMonth = month) => state.installments.map(item => ({ ...item, monthlyAmount: installmentAt(item, targetMonth) })).filter(item => item.monthlyAmount !== null);
+function installmentNumberAt(item, targetMonth) { return (Number(targetMonth.slice(0, 4)) - Number(item.startMonth.slice(0, 4))) * 12 + Number(targetMonth.slice(5)) - Number(item.startMonth.slice(5)) + 1; }
+const installmentsInMonth = (targetMonth = month) => state.installments.map(item => ({ ...item, installmentNumber: installmentNumberAt(item, targetMonth), monthlyAmount: installmentAt(item, targetMonth) })).filter(item => item.monthlyAmount !== null).map(item => ({ ...item, paid: item.paidInstallments.includes(item.installmentNumber) }));
+const recurringInMonth = (targetMonth = month) => state.recurringExpenses.filter(item => item.startMonth <= targetMonth && (!item.endMonth || item.endMonth >= targetMonth)).map(item => ({ ...item, paid: item.paidMonths.includes(targetMonth) }));
 const ordered = rows => [...rows].sort((a, b) => b.date.localeCompare(a.date) || a.description.localeCompare(b.description));
 const options = (all = false) => (all ? '<option value="">Todas as categorias</option>' : '') + state.categories.map(c => `<option value="${escape(c.id)}">${escape(c.name)}</option>`).join('');
 function toast(message) { $('#toast').textContent = message; $('#toast').hidden = false; clearTimeout(toast.timer); toast.timer = setTimeout(() => $('#toast').hidden = true, 4500); }
@@ -64,13 +71,13 @@ function empty(title, text, action = '') { return `<div class="empty"><div class
 // 2. Renderização. Cada função transforma dados em uma parte da tela.
 function statCards() {
   const t = totals(state.transactions, month);
-  const installments = installmentsInMonth();
-  const committed = installments.reduce((total, item) => total + item.monthlyAmount, 0);
+  const installments = installmentsInMonth(); const recurring = recurringInMonth();
+  const committed = installments.filter(item => !item.paid).reduce((total, item) => total + item.monthlyAmount, 0) + recurring.filter(item => !item.paid).reduce((total, item) => total + item.amount, 0);
   const cards = [
     ['Saldo acumulado', t.balance, 'wallet', 'Efetivados até o fim deste mês', 'featured'],
     ['Receitas do mês', t.income, 'down', `${money(t.receivable)} a receber`, ''],
     ['Despesas do mês', t.expense, 'up', 'Pagamentos já efetivados', ''],
-    ['Contas a pagar', t.payable + committed, 'clock', `${monthly().filter(t => t.status === 'pending' && t.type === 'expense').length} contas + ${installments.length} parcelas`, '']
+    ['Contas a pagar', t.payable + committed, 'clock', `${monthly().filter(t => t.status === 'pending' && t.type === 'expense').length} contas + ${installments.filter(i => !i.paid).length + recurring.filter(i => !i.paid).length} compromissos`, '']
   ];
   return `<section class="cards" aria-label="Resumo financeiro">${cards.map(([label, value, image, note, css]) => `<article class="stat-card ${css}"><div class="stat-label">${label}<span class="stat-icon">${icon(image)}</span></div><div class="stat-value">${money(value)}</div><div class="stat-note">${note}</div></article>`).join('')}</section>`;
 }
@@ -122,23 +129,28 @@ function renderBudgets() {
   const budgets = state.budgets.filter(b => b.month === month);
   const totalLimit = sum(budgets);
   return `<section class="panel purchase-planner"><div><p class="eyebrow">DECISÃO DE COMPRA</p><h2>À vista ou parcelado?</h2><p>Compare o impacto de uma compra no saldo e nos próximos meses antes de decidir.</p></div><button class="primary" data-action="planner">Simular compra</button></section><div class="panel-heading"><div><h2>Planejamento de ${monthName(month)}</h2><p>Os limites incluem despesas lançadas e parcelas previstas. Total planejado: ${money(totalLimit)}.</p></div><button class="secondary" data-action="budget">＋ Definir limite</button></div>${!budgets.length ? `<section class="panel">${empty('Dê um plano ao seu dinheiro', 'Defina um limite mensal por categoria e acompanhe o quanto já comprometeu.', '<button class="primary" data-action="budget">Criar primeiro orçamento</button>')}</section>` : `<div class="budget-grid">${budgets.map(b => {
-    const c = category(b.category); const spent = sum(monthly().filter(t => t.type === 'expense' && t.category === b.category)) + sum(installmentsInMonth().filter(t => t.category === b.category).map(t => ({ amount: t.monthlyAmount }))); const remaining = b.amount - spent;
+    const c = category(b.category); const spent = sum(monthly().filter(t => t.type === 'expense' && t.category === b.category)) + sum(installmentsInMonth().filter(t => t.category === b.category).map(t => ({ amount: t.monthlyAmount }))) + sum(recurringInMonth().filter(t => t.category === b.category)); const remaining = b.amount - spent;
     return `<section class="panel budget-card ${remaining < 0 ? 'over' : ''}"><div class="panel-heading"><h2><i class="color-dot" style="background:${c.color}"></i>${escape(c.name)}</h2><span class="pill">${Math.round(spent / b.amount * 100)}%</span></div><div class="budget-values"><strong>${money(spent)}</strong><small>de ${money(b.amount)}</small></div><progress max="${b.amount}" value="${Math.min(spent, b.amount)}" aria-label="Orçamento de ${escape(c.name)}"></progress><p class="budget-note ${remaining < 0 ? 'negative' : ''}">${remaining < 0 ? `${money(-remaining)} acima do limite` : `${money(remaining)} disponíveis para gastar`}</p><div class="budget-actions"><button class="text-button" data-action="budget" data-id="${b.category}">Editar limite</button><button class="text-button" data-action="delete-budget" data-id="${b.category}">Remover</button></div></section>`;
   }).join('')}</div>`}`;
 }
 function renderInstallments() {
-  const active = installmentsInMonth();
-  const monthlyTotal = active.reduce((total, item) => total + item.monthlyAmount, 0);
-  return `<section class="commitment-hero"><div><p class="eyebrow">COMPROMISSOS DE ${monthName(month).toUpperCase()}</p><strong>${money(monthlyTotal)}</strong><span>${active.length} parcela${active.length === 1 ? '' : 's'} prevista${active.length === 1 ? '' : 's'} neste mês</span></div><button class="primary" data-action="installment">＋ Adicionar compra</button></section>${!state.installments.length ? `<section class="panel">${empty('Nenhuma compra parcelada', 'Cadastre uma compra para visualizar quanto ela compromete em cada mês.', '<button class="primary" data-action="installment">Adicionar primeira compra</button>')}</section>` : `<div class="installment-grid">${state.installments.map(item => { const amount = installmentAt(item, month); const end = monthOffset(item.startMonth, item.installmentCount - 1); const index = amount === null ? null : (Number(month.slice(0,4)) - Number(item.startMonth.slice(0,4))) * 12 + Number(month.slice(5)) - Number(item.startMonth.slice(5)) + 1; return `<article class="panel installment-card"><div class="panel-heading"><div><span class="tag">${escape(category(item.category).name)}</span><h2>${escape(item.description)}</h2></div><button class="row-delete" data-action="delete-installment" data-id="${item.id}" aria-label="Excluir ${escape(item.description)}">${icon('trash')}</button></div><div class="installment-amount"><strong>${money(Math.floor(item.totalAmount / item.installmentCount))}</strong><span>por mês · ${item.installmentCount}x</span></div><dl><div><dt>Valor total</dt><dd>${money(item.totalAmount)}</dd></div><div><dt>Período</dt><dd>${monthName(item.startMonth)} — ${monthName(end)}</dd></div><div><dt>Neste mês</dt><dd>${index ? `${index}ª parcela · ${money(amount)}` : month < item.startMonth ? 'Ainda não começou' : 'Finalizado'}</dd></div></dl></article>`; }).join('')}</div>`}`;
+  const active = installmentsInMonth(); const recurring = recurringInMonth();
+  const monthlyTotal = active.filter(item => !item.paid).reduce((total, item) => total + item.monthlyAmount, 0) + recurring.filter(item => !item.paid).reduce((total, item) => total + item.amount, 0);
+  const installmentCards = state.installments.map(item => { const amount = installmentAt(item, month); const end = monthOffset(item.startMonth, item.installmentCount - 1); const index = amount === null ? null : installmentNumberAt(item, month); const paid = index && item.paidInstallments.includes(index); return `<article class="panel installment-card ${paid ? 'commitment-paid' : ''}"><div class="panel-heading"><div><span class="tag">${escape(category(item.category).name)}</span><h2>${escape(item.description)}</h2></div><div class="row-actions"><button data-action="edit-installment" data-id="${item.id}" aria-label="Editar ${escape(item.description)}">${icon('edit')}</button><button data-action="delete-installment" data-id="${item.id}" aria-label="Excluir ${escape(item.description)}">${icon('trash')}</button></div></div><div class="installment-amount"><strong>${money(Math.floor(item.totalAmount / item.installmentCount))}</strong><span>por mês · ${item.installmentCount}x</span></div><dl><div><dt>Valor total</dt><dd>${money(item.totalAmount)}</dd></div><div><dt>Período</dt><dd>${monthName(item.startMonth)} — ${monthName(end)}</dd></div><div><dt>Neste mês</dt><dd>${index ? `${index}ª parcela · ${money(amount)}` : month < item.startMonth ? 'Ainda não começou' : 'Finalizado'}</dd></div></dl>${index ? `<button class="${paid ? 'secondary' : 'primary'} commitment-action" data-action="toggle-installment-paid" data-id="${item.id}">${paid ? 'Marcar como pendente' : 'Marcar parcela como paga'}</button>` : ''}</article>`; }).join('');
+  const recurringCards = state.recurringExpenses.map(item => { const activeNow = item.startMonth <= month && (!item.endMonth || item.endMonth >= month); const paid = item.paidMonths.includes(month); return `<article class="panel installment-card ${paid ? 'commitment-paid' : ''}"><div class="panel-heading"><div><span class="tag">Recorrente · dia ${item.dueDay}</span><h2>${escape(item.description)}</h2></div><div class="row-actions"><button data-action="edit-recurring" data-id="${item.id}" aria-label="Editar ${escape(item.description)}">${icon('edit')}</button><button data-action="delete-recurring" data-id="${item.id}" aria-label="Excluir ${escape(item.description)}">${icon('trash')}</button></div></div><div class="installment-amount"><strong>${money(item.amount)}</strong><span>todo mês</span></div><dl><div><dt>Categoria</dt><dd>${escape(category(item.category).name)}</dd></div><div><dt>Período</dt><dd>${monthName(item.startMonth)} — ${item.endMonth ? monthName(item.endMonth) : 'sem término'}</dd></div><div><dt>Neste mês</dt><dd>${activeNow ? paid ? 'Pago' : 'Pendente' : 'Fora do período'}</dd></div></dl>${activeNow ? `<button class="${paid ? 'secondary' : 'primary'} commitment-action" data-action="toggle-recurring-paid" data-id="${item.id}">${paid ? 'Marcar como pendente' : 'Marcar mês como pago'}</button>` : ''}</article>`; }).join('');
+  return `<section class="commitment-hero"><div><p class="eyebrow">COMPROMISSOS PENDENTES EM ${monthName(month).toUpperCase()}</p><strong>${money(monthlyTotal)}</strong><span>${active.filter(i => !i.paid).length + recurring.filter(i => !i.paid).length} pagamentos previstos neste mês</span></div><div class="hero-actions"><button class="secondary" data-action="recurring">＋ Conta recorrente</button><button class="primary" data-action="installment">＋ Compra parcelada</button></div></section>${!state.installments.length && !state.recurringExpenses.length ? `<section class="panel">${empty('Nenhum compromisso cadastrado', 'Adicione compras parceladas ou contas que se repetem todo mês.')}</section>` : `<div class="commitment-section"><div class="panel-heading"><div><h2>Compras parceladas</h2><p>${state.installments.length} cadastradas</p></div></div><div class="installment-grid">${installmentCards || '<div class="panel empty">Nenhuma compra parcelada.</div>'}</div></div><div class="commitment-section"><div class="panel-heading"><div><h2>Despesas recorrentes</h2><p>Aluguel, assinaturas e contas mensais</p></div></div><div class="installment-grid">${recurringCards || '<div class="panel empty">Nenhuma despesa recorrente.</div>'}</div></div>`}`;
+}
+function renderGoals() {
+  return `<div class="panel-heading"><div><h2>${state.goals.length} meta${state.goals.length === 1 ? '' : 's'} em andamento</h2><p>Acompanhe o valor guardado e o prazo de cada objetivo.</p></div><button class="primary" data-action="goal">＋ Nova meta</button></div>${!state.goals.length ? `<section class="panel">${empty('Crie sua primeira meta', 'Defina um objetivo, o valor necessário e quando pretende alcançá-lo.', '<button class="primary" data-action="goal">Criar meta</button>')}</section>` : `<div class="goal-grid">${state.goals.map(goal => { const percent = Math.min(100, Math.round(goal.currentAmount / goal.targetAmount * 100)); const remaining = Math.max(0, goal.targetAmount - goal.currentAmount); return `<article class="panel goal-card"><div class="panel-heading"><div><span class="goal-percent">${percent}%</span><h2>${escape(goal.name)}</h2></div><div class="row-actions"><button data-action="edit-goal" data-id="${goal.id}" aria-label="Editar ${escape(goal.name)}">${icon('edit')}</button><button data-action="delete-goal" data-id="${goal.id}" aria-label="Excluir ${escape(goal.name)}">${icon('trash')}</button></div></div><progress max="${goal.targetAmount}" value="${Math.min(goal.currentAmount, goal.targetAmount)}"></progress><div class="goal-values"><strong>${money(goal.currentAmount)}</strong><span>de ${money(goal.targetAmount)}</span></div><p>Faltam <strong>${money(remaining)}</strong> · prazo ${dateLabel(goal.targetDate)}</p></article>`; }).join('')}</div>`}`;
 }
 function renderAdmin() {
   if (!currentUser?.isAdmin) return `<section class="panel">${empty('Acesso restrito', 'Somente o administrador pode gerenciar usuários.')}</section>`;
   if (!adminUsers) { queueMicrotask(loadAdminUsers); return '<section class="panel empty">Carregando usuários…</section>'; }
-  return `<div class="panel-heading"><div><h2>${adminUsers.length} usuário${adminUsers.length === 1 ? '' : 's'} cadastrado${adminUsers.length === 1 ? '' : 's'}</h2><p>Crie contas e atualize nome, e-mail ou senha temporária.</p></div><button class="primary" data-action="new-user">＋ Novo usuário</button></div><section class="panel table-panel"><div class="table-wrap"><table><thead><tr><th>USUÁRIO</th><th>E-MAIL</th><th>PERFIL</th><th>ÚLTIMO ACESSO</th><th>AÇÕES</th></tr></thead><tbody>${adminUsers.map(user => `<tr><td><strong>${escape(user.name)}</strong></td><td>${escape(user.email)}</td><td><span class="status ${user.isAdmin ? 'paid' : 'pending'}">${user.isAdmin ? 'Administrador' : 'Usuário'}</span></td><td>${user.lastSignInAt ? new Date(user.lastSignInAt).toLocaleString('pt-BR') : 'Nunca acessou'}</td><td><button class="text-button" data-action="edit-user" data-id="${user.id}">Editar</button></td></tr>`).join('')}</tbody></table></div></section>`;
+  return `<div class="panel-heading"><div><h2>${adminUsers.length} usuário${adminUsers.length === 1 ? '' : 's'} cadastrado${adminUsers.length === 1 ? '' : 's'}</h2><p>Crie contas, ajuste acessos e atualize dados.</p></div><button class="primary" data-action="new-user">＋ Novo usuário</button></div><section class="panel table-panel"><div class="table-wrap"><table><thead><tr><th>USUÁRIO</th><th>E-MAIL</th><th>ACESSO</th><th>ÚLTIMO ACESSO</th><th>AÇÕES</th></tr></thead><tbody>${adminUsers.map(user => `<tr><td><strong>${escape(user.name)}</strong>${user.isAdmin ? '<small class="table-note">Administrador</small>' : ''}</td><td>${escape(user.email)}</td><td><span class="status ${user.blocked ? 'pending' : 'paid'}">${user.blocked ? 'Bloqueado' : 'Ativo'}</span></td><td>${user.lastSignInAt ? new Date(user.lastSignInAt).toLocaleString('pt-BR') : 'Nunca acessou'}</td><td><div class="admin-actions"><button class="text-button" data-action="edit-user" data-id="${user.id}">Editar</button>${user.id !== currentUser.id ? `<button class="text-button" data-action="toggle-user-block" data-id="${user.id}">${user.blocked ? 'Desbloquear' : 'Bloquear'}</button><button class="text-button danger-text" data-action="delete-user" data-id="${user.id}">Excluir</button>` : ''}</div></td></tr>`).join('')}</tbody></table></div></section>`;
 }
 async function loadAdminUsers() { try { adminUsers = await request('/admin/users'); if (page === 'admin') render(); } catch (error) { $('#page-content').innerHTML = `<section class="panel">${empty('Não foi possível carregar', escape(error.message), '<button class="secondary" data-action="reload-users">Tentar novamente</button>')}</section>`; } }
 function renderCategories() {
-  return `<section class="panel" style="margin-bottom:24px"><h2>Nova categoria</h2><form id="category-form" class="inline-form"><label>Nome<input name="name" placeholder="Ex.: Pets" maxlength="40" required></label><label class="color-field">Cor<input name="color" type="color" value="#5277cf"></label><button class="primary">Adicionar categoria</button></form><p class="muted" style="font-size:.81rem">As categorias ficam disponíveis em receitas, despesas e orçamentos.</p></section><div class="category-grid">${state.categories.map(c => { const records = state.transactions.filter(t => t.category === c.id).length; const installments = state.installments.filter(item => item.category === c.id).length; return `<article class="panel category-item"><i class="color-dot" style="background:${c.color}"></i><strong>${escape(c.name)}</strong><small>${records} lançamentos · ${installments} parcelamentos</small>${c.id === 'outros' ? '<span class="category-required">Categoria padrão</span>' : `<button class="row-delete category-delete" data-action="delete-category" data-id="${escape(c.id)}" aria-label="Remover ${escape(c.name)}" title="Remover categoria">${icon('trash')}</button>`}</article>`; }).join('')}</div>`;
+  return `<section class="panel" style="margin-bottom:24px"><h2>Nova categoria</h2><form id="category-form" class="inline-form"><label>Nome<input name="name" placeholder="Ex.: Pets" maxlength="40" required></label><label class="color-field">Cor<input name="color" type="color" value="#5277cf"></label><button class="primary">Adicionar categoria</button></form><p class="muted" style="font-size:.81rem">As categorias ficam disponíveis em receitas, despesas e orçamentos.</p></section><div class="category-grid">${state.categories.map(c => { const records = state.transactions.filter(t => t.category === c.id).length; const installments = state.installments.filter(item => item.category === c.id).length; const recurring = state.recurringExpenses.filter(item => item.category === c.id).length; return `<article class="panel category-item"><i class="color-dot" style="background:${c.color}"></i><strong>${escape(c.name)}</strong><small>${records} lançamentos · ${installments + recurring} compromissos</small>${c.id === 'outros' ? '<span class="category-required">Categoria padrão</span>' : `<button class="row-delete category-delete" data-action="delete-category" data-id="${escape(c.id)}" aria-label="Remover ${escape(c.name)}" title="Remover categoria">${icon('trash')}</button>`}</article>`; }).join('')}</div>`;
 }
 function renderSettings() {
   return `<div class="settings-grid"><section class="panel">${icon('download')}<h2>Backup completo</h2><p>Baixe lançamentos, parcelamentos, categorias e orçamentos em um arquivo JSON. Guarde uma cópia fora deste computador.</p><button class="primary" data-action="backup">${icon('download')} Baixar backup</button></section><section class="panel">${icon('upload')}<h2>Restaurar seus dados</h2><p>Recupere um backup criado pelo Nexora. A restauração substitui os dados atuais; você poderá revisar a quantidade de registros antes de confirmar.</p><button class="secondary" data-action="restore">${icon('upload')} Selecionar backup</button><input type="file" id="backup-file" accept=".json,application/json" hidden></section><section class="panel">${icon('list')}<h2>Levar para a planilha</h2><p>Exporte os lançamentos do mês selecionado em CSV, compatível com Excel e outras planilhas. Na tela Lançamentos, a exportação respeita seus filtros.</p><button class="secondary" data-action="csv">Exportar ${monthName(month)}</button></section><section class="panel">${icon('leaf')}<h2>Explore sem alterar seus dados</h2><p>Veja um exemplo de finanças organizadas. A demonstração usa dados fictícios temporários e mantém seus registros reais separados.</p><button class="secondary" data-action="demo">Explorar demonstração ↗</button></section></div><div class="panel settings-note"><strong>Onde seus dados ficam?</strong><p>Seus registros ficam protegidos no banco de dados e vinculados exclusivamente à sua conta. Faça backups regularmente.</p><p class="muted">${state.transactions.length} lançamentos · ${state.installments.length} parcelamentos · ${state.categories.length} categorias · ${state.budgets.length} orçamentos</p></div>`;
@@ -147,10 +159,11 @@ function render() {
   page = Object.hasOwn(titles, location.hash.slice(1)) ? location.hash.slice(1) : 'overview';
   $('#page-title').textContent = titles[page][0]; $('#breadcrumb').textContent = titles[page][0]; $('#page-description').textContent = titles[page][1];
   document.title = `${titles[page][0]} · Nexora`;
+  $('#month-label').textContent = monthName(month);
   document.querySelectorAll('[data-page]').forEach(a => { a.classList.toggle('active', a.dataset.page === page); if (a.dataset.page === page) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
   $('#demo-banner').hidden = !demo;
   if (!state) return;
-  $('#page-content').innerHTML = ({ overview: renderOverview, transactions: renderTransactions, budgets: renderBudgets, installments: renderInstallments, categories: renderCategories, admin: renderAdmin, settings: renderSettings })[page]();
+  $('#page-content').innerHTML = ({ overview: renderOverview, transactions: renderTransactions, budgets: renderBudgets, installments: renderInstallments, goals: renderGoals, categories: renderCategories, admin: renderAdmin, settings: renderSettings })[page]();
   if (page === 'transactions') for (const key of ['type', 'status', 'category']) $(`#filter-${key}`).value = filter[key];
 }
 
@@ -184,19 +197,34 @@ function updateInstallmentPreview() {
     $('#installment-preview').innerHTML = `<strong>${count}x de aproximadamente ${money(Math.floor(total / count))}</strong><span>Última parcela em ${monthName(monthOffset(form.elements.startMonth.value, count - 1))}</span>`;
   } catch { $('#installment-preview').innerHTML = '<span>Informe o valor e as parcelas para ver a previsão.</span>'; }
 }
-function openInstallment(prefill = {}) {
+function openInstallment(value = {}) {
   if (!ensureReal()) return;
+  const item = typeof value === 'string' ? state.installments.find(entry => entry.id === value) : null; const prefill = item || value;
   const form = $('#installment-form'); form.reset(); form.querySelector('.form-error').textContent = '';
   form.elements.category.innerHTML = options(); form.elements.category.value = 'outros'; form.elements.startMonth.value = month; form.elements.installmentCount.value = prefill.installmentCount || 12;
   form.elements.dueDay.value = 10; form.elements.description.value = prefill.description || ''; form.elements.totalAmount.value = prefill.totalAmount || '';
+  if (item) { form.elements.id.value = item.id; form.elements.totalAmount.value = (item.totalAmount / 100).toFixed(2).replace('.', ','); form.elements.startMonth.value = item.startMonth; form.elements.dueDay.value = item.dueDay; form.elements.category.value = item.category; }
+  $('#installment-title').textContent = item ? 'Editar compra parcelada' : 'Adicionar compra parcelada';
   updateInstallmentPreview(); $('#installment-dialog').showModal(); form.elements.description.focus();
+}
+function openRecurring(id) {
+  if (!ensureReal()) return; const form = $('#recurring-form'); form.reset(); form.querySelector('.form-error').textContent = ''; form.elements.category.innerHTML = options(); form.elements.category.value = 'outros'; form.elements.startMonth.value = month; form.elements.dueDay.value = 10;
+  const item = state.recurringExpenses.find(entry => entry.id === id); $('#recurring-title').textContent = item ? 'Editar despesa recorrente' : 'Nova despesa recorrente';
+  if (item) { form.elements.id.value = item.id; form.elements.description.value = item.description; form.elements.amount.value = (item.amount / 100).toFixed(2).replace('.', ','); form.elements.startMonth.value = item.startMonth; form.elements.endMonth.value = item.endMonth; form.elements.dueDay.value = item.dueDay; form.elements.category.value = item.category; }
+  $('#recurring-dialog').showModal(); form.elements.description.focus();
+}
+function openGoal(id) {
+  if (!ensureReal()) return; const form = $('#goal-form'); form.reset(); form.querySelector('.form-error').textContent = ''; form.elements.currentAmount.value = '0,00'; form.elements.targetDate.value = `${Number(month.slice(0,4)) + 1}-${month.slice(5)}-01`;
+  const item = state.goals.find(entry => entry.id === id); $('#goal-title').textContent = item ? 'Editar meta' : 'Nova meta';
+  if (item) { form.elements.id.value = item.id; form.elements.name.value = item.name; form.elements.targetAmount.value = (item.targetAmount / 100).toFixed(2).replace('.', ','); form.elements.currentAmount.value = (item.currentAmount / 100).toFixed(2).replace('.', ','); form.elements.targetDate.value = item.targetDate; }
+  $('#goal-dialog').showModal(); form.elements.name.focus();
 }
 function updatePlanner() {
   const form = $('#planner-form'); const button = form.querySelector('[data-action="save-simulation"]');
   try {
     const cash = toCents(form.elements.cashAmount.value); const financed = toCents(form.elements.financedAmount.value); const count = Number(form.elements.installmentCount.value);
     if (!Number.isInteger(count) || count < 2 || count > 120) throw new Error('Parcelas inválidas.');
-    const perMonth = Math.floor(financed / count); const selected = totals(state.transactions, month); const obligations = installmentsInMonth().reduce((total, item) => total + item.monthlyAmount, 0); const monthlyFree = selected.income - selected.expense - selected.payable - obligations;
+    const perMonth = Math.floor(financed / count); const selected = totals(state.transactions, month); const obligations = installmentsInMonth().filter(item => !item.paid).reduce((total, item) => total + item.monthlyAmount, 0) + recurringInMonth().filter(item => !item.paid).reduce((total, item) => total + item.amount, 0); const monthlyFree = selected.income - selected.expense - selected.payable - obligations;
     const difference = financed - cash; const afterCash = selected.balance - cash;
     $('#planner-result').innerHTML = `<div class="comparison-card"><span>PIX / À VISTA</span><strong>${money(cash)}</strong><p>Saldo após a compra: <b class="${afterCash < 0 ? 'negative' : ''}">${money(afterCash)}</b></p></div><div class="comparison-card"><span>PARCELADO</span><strong>${count}x de ${money(perMonth)}</strong><p>Sobra mensal estimada: <b class="${monthlyFree - perMonth < 0 ? 'negative' : ''}">${money(monthlyFree - perMonth)}</b></p><small>${difference > 0 ? `${money(difference)} a mais no total` : difference < 0 ? `${money(-difference)} mais barato que à vista` : 'Mesmo valor total'}</small></div>`;
     button.disabled = false;
@@ -234,7 +262,7 @@ function exportCsv() {
 }
 function startDemo() {
   if (demo) { location.hash = 'overview'; return; }
-  realState = state; demo = true; state = structuredClone(state); state.transactions = []; state.budgets = []; state.installments = [];
+  realState = state; demo = true; state = structuredClone(state); state.transactions = []; state.budgets = []; state.installments = []; state.recurringExpenses = []; state.goals = [];
   // Usa as categorias iniciais mesmo após a restauração de um backup personalizado.
   const demoCategories = [{ id:'salario',name:'Salário',color:'#17876b' },{id:'freelance',name:'Freelance',color:'#5277cf'},{id:'moradia',name:'Moradia',color:'#397a69'},{id:'alimentacao',name:'Alimentação',color:'#e1a34b'},{id:'transporte',name:'Transporte',color:'#6387cb'},{id:'saude',name:'Saúde',color:'#b97ab2'},{id:'lazer',name:'Lazer',color:'#d47c62'},{id:'educacao',name:'Educação',color:'#779853'},{id:'outros',name:'Outros',color:'#80908c'}];
   state.categories = demoCategories;
@@ -253,6 +281,7 @@ function startDemo() {
 
 // 4. Eventos do usuário, agrupados para facilitar a leitura.
 $('#month').value = month;
+$('#month-trigger').addEventListener('click', () => { const picker = $('#month'); if (typeof picker.showPicker === 'function') picker.showPicker(); else picker.click(); });
 $('#month').addEventListener('change', event => { if (!event.target.value || !event.target.validity.valid) { event.target.value = month; return; } month = event.target.value; filter.page = 1; render(); });
 window.addEventListener('hashchange', render);
 $('#new-transaction').addEventListener('click', () => openTransaction());
@@ -273,7 +302,17 @@ $('#budget-form').addEventListener('submit', async event => {
 $('#installment-form').addEventListener('input', updateInstallmentPreview);
 $('#installment-form').addEventListener('submit', async event => {
   event.preventDefault(); if (!ensureReal()) return; const form = event.currentTarget; const button = form.querySelector('.primary'); button.disabled = true;
-  try { await mutate('/installments', 'POST', { description: form.elements.description.value, totalAmount: toCents(form.elements.totalAmount.value), installmentCount: Number(form.elements.installmentCount.value), startMonth: form.elements.startMonth.value, dueDay: Number(form.elements.dueDay.value), category: form.elements.category.value }, 'Compra parcelada adicionada.'); $('#installment-dialog').close(); }
+  try { const id = form.elements.id.value; const previous = state.installments.find(item => item.id === id); await mutate(id ? `/installments/${id}` : '/installments', id ? 'PUT' : 'POST', { description: form.elements.description.value, totalAmount: toCents(form.elements.totalAmount.value), installmentCount: Number(form.elements.installmentCount.value), startMonth: form.elements.startMonth.value, dueDay: Number(form.elements.dueDay.value), category: form.elements.category.value, paidInstallments: (previous?.paidInstallments || []).filter(number => number <= Number(form.elements.installmentCount.value)) }, id ? 'Parcelamento atualizado.' : 'Compra parcelada adicionada.'); $('#installment-dialog').close(); }
+  catch (error) { form.querySelector('.form-error').textContent = error.message; } finally { button.disabled = false; }
+});
+$('#recurring-form').addEventListener('submit', async event => {
+  event.preventDefault(); if (!ensureReal()) return; const form = event.currentTarget; const button = form.querySelector('.primary'); button.disabled = true;
+  try { const id = form.elements.id.value; const previous = state.recurringExpenses.find(item => item.id === id); await mutate(id ? `/recurring-expenses/${id}` : '/recurring-expenses', id ? 'PUT' : 'POST', { description: form.elements.description.value, amount: toCents(form.elements.amount.value), startMonth: form.elements.startMonth.value, endMonth: form.elements.endMonth.value, dueDay: Number(form.elements.dueDay.value), category: form.elements.category.value, paidMonths: previous?.paidMonths || [] }, id ? 'Despesa recorrente atualizada.' : 'Despesa recorrente adicionada.'); $('#recurring-dialog').close(); }
+  catch (error) { form.querySelector('.form-error').textContent = error.message; } finally { button.disabled = false; }
+});
+$('#goal-form').addEventListener('submit', async event => {
+  event.preventDefault(); if (!ensureReal()) return; const form = event.currentTarget; const button = form.querySelector('.primary'); button.disabled = true;
+  try { const id = form.elements.id.value; const saved = form.elements.currentAmount.value.trim(); await mutate(id ? `/goals/${id}` : '/goals', id ? 'PUT' : 'POST', { name: form.elements.name.value, targetAmount: toCents(form.elements.targetAmount.value), currentAmount: /^0([,.]0{1,2})?$/.test(saved) ? 0 : toCents(saved), targetDate: form.elements.targetDate.value }, id ? 'Meta atualizada.' : 'Meta criada.'); $('#goal-dialog').close(); }
   catch (error) { form.querySelector('.form-error').textContent = error.message; } finally { button.disabled = false; }
 });
 $('#planner-form').addEventListener('input', updatePlanner);
@@ -310,6 +349,9 @@ $('#page-content').addEventListener('click', async event => {
   if (action === 'new' || action === 'edit') return openTransaction(id);
   if (action === 'budget') return openBudget(id);
   if (action === 'installment') return openInstallment();
+  if (action === 'edit-installment') return openInstallment(id);
+  if (action === 'recurring' || action === 'edit-recurring') return openRecurring(id);
+  if (action === 'goal' || action === 'edit-goal') return openGoal(id);
   if (action === 'planner') return openPlanner();
   if (action === 'new-user' || action === 'edit-user') return openUser(id);
   if (action === 'reload-users') { adminUsers = null; return render(); }
@@ -323,7 +365,13 @@ $('#page-content').addEventListener('click', async event => {
     if (action === 'settle') { const item = state.transactions.find(t => t.id === id); await mutate(`/transactions/${id}`, 'PUT', { ...item, status: 'paid' }, 'Lançamento efetivado.'); }
     if (action === 'delete-budget' && await confirmAction('Remover este limite mensal? Seus lançamentos serão mantidos.', 'Remover limite')) await mutate('/budgets', 'DELETE', { month, category: id }, 'Limite removido.');
     if (action === 'delete-installment') { const item = state.installments.find(entry => entry.id === id); if (await confirmAction(`Excluir o parcelamento de “${item.description}”?`, 'Excluir parcelamento')) await mutate(`/installments/${id}`, 'DELETE', {}, 'Parcelamento excluído.'); }
-    if (action === 'delete-category') { const item = category(id); const records = state.transactions.filter(entry => entry.category === id).length; const installments = state.installments.filter(entry => entry.category === id).length; if (await confirmAction(`Remover “${item.name}”? ${records} lançamentos e ${installments} parcelamentos serão movidos para Outros. Os limites dessa categoria serão removidos.`, 'Remover categoria')) await mutate(`/categories/${id}`, 'DELETE', {}, 'Categoria removida.'); }
+    if (action === 'toggle-installment-paid') { const item = state.installments.find(entry => entry.id === id); const number = installmentNumberAt(item, month); const paidInstallments = item.paidInstallments.includes(number) ? item.paidInstallments.filter(value => value !== number) : [...item.paidInstallments, number]; await mutate(`/installments/${id}`, 'PUT', { ...item, paidInstallments }, item.paidInstallments.includes(number) ? 'Parcela voltou para pendente.' : 'Parcela marcada como paga.'); }
+    if (action === 'delete-recurring') { const item = state.recurringExpenses.find(entry => entry.id === id); if (await confirmAction(`Excluir a recorrência “${item.description}”?`, 'Excluir recorrência')) await mutate(`/recurring-expenses/${id}`, 'DELETE', {}, 'Recorrência excluída.'); }
+    if (action === 'toggle-recurring-paid') { const item = state.recurringExpenses.find(entry => entry.id === id); const paidMonths = item.paidMonths.includes(month) ? item.paidMonths.filter(value => value !== month) : [...item.paidMonths, month]; await mutate(`/recurring-expenses/${id}`, 'PUT', { ...item, paidMonths }, item.paidMonths.includes(month) ? 'Conta voltou para pendente.' : 'Conta marcada como paga.'); }
+    if (action === 'delete-goal') { const item = state.goals.find(entry => entry.id === id); if (await confirmAction(`Excluir a meta “${item.name}”?`, 'Excluir meta')) await mutate(`/goals/${id}`, 'DELETE', {}, 'Meta excluída.'); }
+    if (action === 'toggle-user-block') { const user = adminUsers.find(entry => entry.id === id); if (await confirmAction(`${user.blocked ? 'Desbloquear' : 'Bloquear'} o acesso de ${user.name}?`, user.blocked ? 'Desbloquear' : 'Bloquear')) { await request(`/admin/users/${id}/block`, 'POST', { blocked: !user.blocked }); adminUsers = await request('/admin/users'); render(); toast(user.blocked ? 'Usuário desbloqueado.' : 'Usuário bloqueado.'); } }
+    if (action === 'delete-user') { const user = adminUsers.find(entry => entry.id === id); if (await confirmAction(`Excluir permanentemente a conta de ${user.name} (${user.email})? Os dados financeiros vinculados deixarão de ser acessíveis.`, 'Excluir conta')) { await request(`/admin/users/${id}`, 'DELETE', {}); adminUsers = await request('/admin/users'); render(); toast('Usuário excluído.'); } }
+    if (action === 'delete-category') { const item = category(id); const records = state.transactions.filter(entry => entry.category === id).length; const commitments = state.installments.filter(entry => entry.category === id).length + state.recurringExpenses.filter(entry => entry.category === id).length; if (await confirmAction(`Remover “${item.name}”? ${records} lançamentos e ${commitments} compromissos serão movidos para Outros. Os limites dessa categoria serão removidos.`, 'Remover categoria')) await mutate(`/categories/${id}`, 'DELETE', {}, 'Categoria removida.'); }
     if (action === 'backup') { const backup = await request('/backup'); download(JSON.stringify(backup, null, 2), `nexora-backup-${today()}.json`, 'application/json'); toast('Backup exportado.'); }
     if (action === 'restore') $('#backup-file').click();
     if (action === 'retry') { state = await request(); render(); }
@@ -333,6 +381,7 @@ $('#page-content').addEventListener('click', async event => {
 const loginDialog = $('#login-dialog');
 const loginForm = $('#login-form');
 const logoutButton = $('#logout-button');
+const themeToggle = $('#theme-toggle');
 const loggedUser = $('#logged-user');
 const topbarAvatar = $('#topbar-avatar');
 const sidebarAvatar = $('#sidebar-avatar');
@@ -342,6 +391,17 @@ loginDialog.addEventListener('cancel', event => event.preventDefault());
 loginDialog.addEventListener('close', () => {
   if (!isAuthenticated()) queueMicrotask(() => loginDialog.showModal());
 });
+function updateThemeButton() {
+  const dark = document.documentElement.dataset.theme === 'dark';
+  themeToggle.textContent = dark ? '☀' : '☾';
+  themeToggle.setAttribute('aria-label', dark ? 'Ativar modo claro' : 'Ativar modo escuro');
+  themeToggle.title = dark ? 'Ativar modo claro' : 'Ativar modo escuro';
+}
+themeToggle.addEventListener('click', () => {
+  const theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+  document.documentElement.dataset.theme = theme; localStorage.setItem(THEME_KEY, theme); updateThemeButton();
+});
+updateThemeButton();
 
 function updateLoggedUser() {
   if (!currentUser) {

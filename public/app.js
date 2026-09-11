@@ -8,6 +8,7 @@ const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(
 let state = null;
 let realState = null;
 let currentUser = null;
+let adminUsers = null;
 let demo = false;
 let month = today().slice(0, 7);
 let page = 'overview';
@@ -16,7 +17,9 @@ const titles = {
   overview: ['Visão geral', 'Um olhar completo para o seu dinheiro.'],
   transactions: ['Lançamentos', 'Cada entrada e saída, no seu devido lugar.'],
   budgets: ['Orçamentos', 'Planeje seus gastos e acompanhe seus limites.'],
+  installments: ['Parcelamentos', 'Acompanhe compras e dívidas que comprometem os próximos meses.'],
   categories: ['Categorias', 'Organize seu dinheiro de um jeito que faz sentido para você.'],
+  admin: ['Usuários', 'Gerencie quem pode acessar o Nexora.'],
   settings: ['Dados e backup', 'Seus registros organizados, suas cópias em segurança.']
 };
 const paths = {
@@ -35,6 +38,7 @@ const paths = {
   check: '<path d="m5 12 4 4L19 6"/>',
   download: '<path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/>',
   upload: '<path d="M12 16V3m-5 5 5-5 5 5M4 16v5h16v-5"/>'
+  ,users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>'
 };
 const icon = name => `<svg viewBox="0 0 24 24" aria-hidden="true">${paths[name] || paths.wallet}</svg>`;
 document.querySelectorAll('[data-icon]').forEach(el => el.innerHTML = icon(el.dataset.icon));
@@ -44,6 +48,13 @@ const category = id => state.categories.find(c => c.id === id) || { name: 'Outro
 const monthName = value => new Date(value + '-15T12:00:00').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
 const dateLabel = value => value.split('-').reverse().join('/');
 const monthly = () => state.transactions.filter(t => t.date.startsWith(month));
+const monthOffset = (value, offset) => { const date = new Date(value + '-15T12:00:00'); date.setMonth(date.getMonth() + offset); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`; };
+function installmentAt(item, targetMonth) {
+  const index = (Number(targetMonth.slice(0, 4)) - Number(item.startMonth.slice(0, 4))) * 12 + Number(targetMonth.slice(5)) - Number(item.startMonth.slice(5));
+  if (index < 0 || index >= item.installmentCount) return null;
+  return Math.floor(item.totalAmount / item.installmentCount) + (index < item.totalAmount % item.installmentCount ? 1 : 0);
+}
+const installmentsInMonth = (targetMonth = month) => state.installments.map(item => ({ ...item, monthlyAmount: installmentAt(item, targetMonth) })).filter(item => item.monthlyAmount !== null);
 const ordered = rows => [...rows].sort((a, b) => b.date.localeCompare(a.date) || a.description.localeCompare(b.description));
 const options = (all = false) => (all ? '<option value="">Todas as categorias</option>' : '') + state.categories.map(c => `<option value="${escape(c.id)}">${escape(c.name)}</option>`).join('');
 function toast(message) { $('#toast').textContent = message; $('#toast').hidden = false; clearTimeout(toast.timer); toast.timer = setTimeout(() => $('#toast').hidden = true, 4500); }
@@ -53,11 +64,13 @@ function empty(title, text, action = '') { return `<div class="empty"><div class
 // 2. Renderização. Cada função transforma dados em uma parte da tela.
 function statCards() {
   const t = totals(state.transactions, month);
+  const installments = installmentsInMonth();
+  const committed = installments.reduce((total, item) => total + item.monthlyAmount, 0);
   const cards = [
     ['Saldo acumulado', t.balance, 'wallet', 'Efetivados até o fim deste mês', 'featured'],
     ['Receitas do mês', t.income, 'down', `${money(t.receivable)} a receber`, ''],
     ['Despesas do mês', t.expense, 'up', 'Pagamentos já efetivados', ''],
-    ['Contas a pagar', t.payable, 'clock', `${monthly().filter(t => t.status === 'pending' && t.type === 'expense').length} pendências neste mês`, '']
+    ['Contas a pagar', t.payable + committed, 'clock', `${monthly().filter(t => t.status === 'pending' && t.type === 'expense').length} contas + ${installments.length} parcelas`, '']
   ];
   return `<section class="cards" aria-label="Resumo financeiro">${cards.map(([label, value, image, note, css]) => `<article class="stat-card ${css}"><div class="stat-label">${label}<span class="stat-icon">${icon(image)}</span></div><div class="stat-value">${money(value)}</div><div class="stat-note">${note}</div></article>`).join('')}</section>`;
 }
@@ -108,16 +121,27 @@ function renderTransactions() {
 function renderBudgets() {
   const budgets = state.budgets.filter(b => b.month === month);
   const totalLimit = sum(budgets);
-  return `<div class="panel-heading"><div><h2>Planejamento de ${monthName(month)}</h2><p>Os limites consideram despesas pagas e pendentes. Total planejado: ${money(totalLimit)}.</p></div><button class="secondary" data-action="budget">＋ Definir limite</button></div>${!budgets.length ? `<section class="panel">${empty('Dê um plano ao seu dinheiro', 'Defina um limite mensal por categoria e acompanhe o quanto já comprometeu.', '<button class="primary" data-action="budget">Criar primeiro orçamento</button>')}</section>` : `<div class="budget-grid">${budgets.map(b => {
-    const c = category(b.category); const spent = sum(monthly().filter(t => t.type === 'expense' && t.category === b.category)); const remaining = b.amount - spent;
+  return `<section class="panel purchase-planner"><div><p class="eyebrow">DECISÃO DE COMPRA</p><h2>À vista ou parcelado?</h2><p>Compare o impacto de uma compra no saldo e nos próximos meses antes de decidir.</p></div><button class="primary" data-action="planner">Simular compra</button></section><div class="panel-heading"><div><h2>Planejamento de ${monthName(month)}</h2><p>Os limites incluem despesas lançadas e parcelas previstas. Total planejado: ${money(totalLimit)}.</p></div><button class="secondary" data-action="budget">＋ Definir limite</button></div>${!budgets.length ? `<section class="panel">${empty('Dê um plano ao seu dinheiro', 'Defina um limite mensal por categoria e acompanhe o quanto já comprometeu.', '<button class="primary" data-action="budget">Criar primeiro orçamento</button>')}</section>` : `<div class="budget-grid">${budgets.map(b => {
+    const c = category(b.category); const spent = sum(monthly().filter(t => t.type === 'expense' && t.category === b.category)) + sum(installmentsInMonth().filter(t => t.category === b.category).map(t => ({ amount: t.monthlyAmount }))); const remaining = b.amount - spent;
     return `<section class="panel budget-card ${remaining < 0 ? 'over' : ''}"><div class="panel-heading"><h2><i class="color-dot" style="background:${c.color}"></i>${escape(c.name)}</h2><span class="pill">${Math.round(spent / b.amount * 100)}%</span></div><div class="budget-values"><strong>${money(spent)}</strong><small>de ${money(b.amount)}</small></div><progress max="${b.amount}" value="${Math.min(spent, b.amount)}" aria-label="Orçamento de ${escape(c.name)}"></progress><p class="budget-note ${remaining < 0 ? 'negative' : ''}">${remaining < 0 ? `${money(-remaining)} acima do limite` : `${money(remaining)} disponíveis para gastar`}</p><div class="budget-actions"><button class="text-button" data-action="budget" data-id="${b.category}">Editar limite</button><button class="text-button" data-action="delete-budget" data-id="${b.category}">Remover</button></div></section>`;
   }).join('')}</div>`}`;
 }
+function renderInstallments() {
+  const active = installmentsInMonth();
+  const monthlyTotal = active.reduce((total, item) => total + item.monthlyAmount, 0);
+  return `<section class="commitment-hero"><div><p class="eyebrow">COMPROMISSOS DE ${monthName(month).toUpperCase()}</p><strong>${money(monthlyTotal)}</strong><span>${active.length} parcela${active.length === 1 ? '' : 's'} prevista${active.length === 1 ? '' : 's'} neste mês</span></div><button class="primary" data-action="installment">＋ Adicionar compra</button></section>${!state.installments.length ? `<section class="panel">${empty('Nenhuma compra parcelada', 'Cadastre uma compra para visualizar quanto ela compromete em cada mês.', '<button class="primary" data-action="installment">Adicionar primeira compra</button>')}</section>` : `<div class="installment-grid">${state.installments.map(item => { const amount = installmentAt(item, month); const end = monthOffset(item.startMonth, item.installmentCount - 1); const index = amount === null ? null : (Number(month.slice(0,4)) - Number(item.startMonth.slice(0,4))) * 12 + Number(month.slice(5)) - Number(item.startMonth.slice(5)) + 1; return `<article class="panel installment-card"><div class="panel-heading"><div><span class="tag">${escape(category(item.category).name)}</span><h2>${escape(item.description)}</h2></div><button class="row-delete" data-action="delete-installment" data-id="${item.id}" aria-label="Excluir ${escape(item.description)}">${icon('trash')}</button></div><div class="installment-amount"><strong>${money(Math.floor(item.totalAmount / item.installmentCount))}</strong><span>por mês · ${item.installmentCount}x</span></div><dl><div><dt>Valor total</dt><dd>${money(item.totalAmount)}</dd></div><div><dt>Período</dt><dd>${monthName(item.startMonth)} — ${monthName(end)}</dd></div><div><dt>Neste mês</dt><dd>${index ? `${index}ª parcela · ${money(amount)}` : month < item.startMonth ? 'Ainda não começou' : 'Finalizado'}</dd></div></dl></article>`; }).join('')}</div>`}`;
+}
+function renderAdmin() {
+  if (!currentUser?.isAdmin) return `<section class="panel">${empty('Acesso restrito', 'Somente o administrador pode gerenciar usuários.')}</section>`;
+  if (!adminUsers) { queueMicrotask(loadAdminUsers); return '<section class="panel empty">Carregando usuários…</section>'; }
+  return `<div class="panel-heading"><div><h2>${adminUsers.length} usuário${adminUsers.length === 1 ? '' : 's'} cadastrado${adminUsers.length === 1 ? '' : 's'}</h2><p>Crie contas e atualize nome, e-mail ou senha temporária.</p></div><button class="primary" data-action="new-user">＋ Novo usuário</button></div><section class="panel table-panel"><div class="table-wrap"><table><thead><tr><th>USUÁRIO</th><th>E-MAIL</th><th>PERFIL</th><th>ÚLTIMO ACESSO</th><th>AÇÕES</th></tr></thead><tbody>${adminUsers.map(user => `<tr><td><strong>${escape(user.name)}</strong></td><td>${escape(user.email)}</td><td><span class="status ${user.isAdmin ? 'paid' : 'pending'}">${user.isAdmin ? 'Administrador' : 'Usuário'}</span></td><td>${user.lastSignInAt ? new Date(user.lastSignInAt).toLocaleString('pt-BR') : 'Nunca acessou'}</td><td><button class="text-button" data-action="edit-user" data-id="${user.id}">Editar</button></td></tr>`).join('')}</tbody></table></div></section>`;
+}
+async function loadAdminUsers() { try { adminUsers = await request('/admin/users'); if (page === 'admin') render(); } catch (error) { $('#page-content').innerHTML = `<section class="panel">${empty('Não foi possível carregar', escape(error.message), '<button class="secondary" data-action="reload-users">Tentar novamente</button>')}</section>`; } }
 function renderCategories() {
   return `<section class="panel" style="margin-bottom:24px"><h2>Nova categoria</h2><form id="category-form" class="inline-form"><label>Nome<input name="name" placeholder="Ex.: Pets" maxlength="40" required></label><label class="color-field">Cor<input name="color" type="color" value="#5277cf"></label><button class="primary">Adicionar categoria</button></form><p class="muted" style="font-size:.81rem">As categorias ficam disponíveis em receitas, despesas e orçamentos.</p></section><div class="category-grid">${state.categories.map(c => `<article class="panel category-item"><i class="color-dot" style="background:${c.color}"></i><strong>${escape(c.name)}</strong><small>${state.transactions.filter(t => t.category === c.id).length} registros</small></article>`).join('')}</div>`;
 }
 function renderSettings() {
-  return `<div class="settings-grid"><section class="panel">${icon('download')}<h2>Backup completo</h2><p>Baixe todos os lançamentos, categorias e orçamentos em um arquivo JSON. Guarde uma cópia fora deste computador.</p><button class="primary" data-action="backup">${icon('download')} Baixar backup</button></section><section class="panel">${icon('upload')}<h2>Restaurar seus dados</h2><p>Recupere um backup criado pelo Nexora. A restauração substitui os dados atuais; você poderá revisar a quantidade de registros antes de confirmar.</p><button class="secondary" data-action="restore">${icon('upload')} Selecionar backup</button><input type="file" id="backup-file" accept=".json,application/json" hidden></section><section class="panel">${icon('list')}<h2>Levar para a planilha</h2><p>Exporte os lançamentos do mês selecionado em CSV, compatível com Excel e outras planilhas. Na tela Lançamentos, a exportação respeita seus filtros.</p><button class="secondary" data-action="csv">Exportar ${monthName(month)}</button></section><section class="panel">${icon('leaf')}<h2>Explore sem alterar seus dados</h2><p>Veja um exemplo de finanças organizadas. A demonstração usa dados fictícios temporários e mantém seus registros reais separados.</p><button class="secondary" data-action="demo">Explorar demonstração ↗</button></section></div><div class="panel settings-note"><strong>Onde seus dados ficam?</strong><p>Seus registros ficam protegidos no banco de dados e vinculados exclusivamente à sua conta. Faça backups regularmente.</p><p class="muted">${state.transactions.length} lançamentos · ${state.categories.length} categorias · ${state.budgets.length} orçamentos</p></div>`;
+  return `<div class="settings-grid"><section class="panel">${icon('download')}<h2>Backup completo</h2><p>Baixe lançamentos, parcelamentos, categorias e orçamentos em um arquivo JSON. Guarde uma cópia fora deste computador.</p><button class="primary" data-action="backup">${icon('download')} Baixar backup</button></section><section class="panel">${icon('upload')}<h2>Restaurar seus dados</h2><p>Recupere um backup criado pelo Nexora. A restauração substitui os dados atuais; você poderá revisar a quantidade de registros antes de confirmar.</p><button class="secondary" data-action="restore">${icon('upload')} Selecionar backup</button><input type="file" id="backup-file" accept=".json,application/json" hidden></section><section class="panel">${icon('list')}<h2>Levar para a planilha</h2><p>Exporte os lançamentos do mês selecionado em CSV, compatível com Excel e outras planilhas. Na tela Lançamentos, a exportação respeita seus filtros.</p><button class="secondary" data-action="csv">Exportar ${monthName(month)}</button></section><section class="panel">${icon('leaf')}<h2>Explore sem alterar seus dados</h2><p>Veja um exemplo de finanças organizadas. A demonstração usa dados fictícios temporários e mantém seus registros reais separados.</p><button class="secondary" data-action="demo">Explorar demonstração ↗</button></section></div><div class="panel settings-note"><strong>Onde seus dados ficam?</strong><p>Seus registros ficam protegidos no banco de dados e vinculados exclusivamente à sua conta. Faça backups regularmente.</p><p class="muted">${state.transactions.length} lançamentos · ${state.installments.length} parcelamentos · ${state.categories.length} categorias · ${state.budgets.length} orçamentos</p></div>`;
 }
 function render() {
   page = Object.hasOwn(titles, location.hash.slice(1)) ? location.hash.slice(1) : 'overview';
@@ -126,7 +150,7 @@ function render() {
   document.querySelectorAll('[data-page]').forEach(a => { a.classList.toggle('active', a.dataset.page === page); if (a.dataset.page === page) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
   $('#demo-banner').hidden = !demo;
   if (!state) return;
-  $('#page-content').innerHTML = ({ overview: renderOverview, transactions: renderTransactions, budgets: renderBudgets, categories: renderCategories, settings: renderSettings })[page]();
+  $('#page-content').innerHTML = ({ overview: renderOverview, transactions: renderTransactions, budgets: renderBudgets, installments: renderInstallments, categories: renderCategories, admin: renderAdmin, settings: renderSettings })[page]();
   if (page === 'transactions') for (const key of ['type', 'status', 'category']) $(`#filter-${key}`).value = filter[key];
 }
 
@@ -152,6 +176,40 @@ function openBudget(id) {
   if (item) { form.elements.category.value = item.category; form.elements.amount.value = (item.amount / 100).toFixed(2).replace('.', ','); }
   $('#budget-dialog').showModal();
 }
+function updateInstallmentPreview() {
+  const form = $('#installment-form');
+  try {
+    const total = toCents(form.elements.totalAmount.value); const count = Number(form.elements.installmentCount.value);
+    if (!Number.isInteger(count) || count < 2 || count > 120) throw new Error();
+    $('#installment-preview').innerHTML = `<strong>${count}x de aproximadamente ${money(Math.floor(total / count))}</strong><span>Última parcela em ${monthName(monthOffset(form.elements.startMonth.value, count - 1))}</span>`;
+  } catch { $('#installment-preview').innerHTML = '<span>Informe o valor e as parcelas para ver a previsão.</span>'; }
+}
+function openInstallment(prefill = {}) {
+  if (!ensureReal()) return;
+  const form = $('#installment-form'); form.reset(); form.querySelector('.form-error').textContent = '';
+  form.elements.category.innerHTML = options(); form.elements.category.value = 'outros'; form.elements.startMonth.value = month; form.elements.installmentCount.value = prefill.installmentCount || 12;
+  form.elements.dueDay.value = 10; form.elements.description.value = prefill.description || ''; form.elements.totalAmount.value = prefill.totalAmount || '';
+  updateInstallmentPreview(); $('#installment-dialog').showModal(); form.elements.description.focus();
+}
+function updatePlanner() {
+  const form = $('#planner-form'); const button = form.querySelector('[data-action="save-simulation"]');
+  try {
+    const cash = toCents(form.elements.cashAmount.value); const financed = toCents(form.elements.financedAmount.value); const count = Number(form.elements.installmentCount.value);
+    if (!Number.isInteger(count) || count < 2 || count > 120) throw new Error('Parcelas inválidas.');
+    const perMonth = Math.floor(financed / count); const selected = totals(state.transactions, month); const obligations = installmentsInMonth().reduce((total, item) => total + item.monthlyAmount, 0); const monthlyFree = selected.income - selected.expense - selected.payable - obligations;
+    const difference = financed - cash; const afterCash = selected.balance - cash;
+    $('#planner-result').innerHTML = `<div class="comparison-card"><span>PIX / À VISTA</span><strong>${money(cash)}</strong><p>Saldo após a compra: <b class="${afterCash < 0 ? 'negative' : ''}">${money(afterCash)}</b></p></div><div class="comparison-card"><span>PARCELADO</span><strong>${count}x de ${money(perMonth)}</strong><p>Sobra mensal estimada: <b class="${monthlyFree - perMonth < 0 ? 'negative' : ''}">${money(monthlyFree - perMonth)}</b></p><small>${difference > 0 ? `${money(difference)} a mais no total` : difference < 0 ? `${money(-difference)} mais barato que à vista` : 'Mesmo valor total'}</small></div>`;
+    button.disabled = false;
+  } catch { $('#planner-result').innerHTML = '<p class="muted">Preencha os valores para comparar o impacto.</p>'; button.disabled = true; }
+}
+function openPlanner() { const form = $('#planner-form'); form.reset(); form.elements.installmentCount.value = 12; form.querySelector('.form-error').textContent = ''; updatePlanner(); $('#planner-dialog').showModal(); form.elements.description.focus(); }
+function openUser(id) {
+  const form = $('#user-form'); form.reset(); form.querySelector('.form-error').textContent = ''; form.elements.id.value = id || '';
+  const user = adminUsers?.find(item => item.id === id); $('#user-title').textContent = user ? 'Editar usuário' : 'Novo usuário';
+  $('#password-label').textContent = user ? 'Nova senha (opcional)' : 'Senha temporária'; $('#password-help').textContent = user ? 'Deixe em branco para manter a senha atual.' : 'Mínimo de 8 caracteres.'; form.elements.password.required = !user;
+  if (user) { form.elements.name.value = user.name; form.elements.email.value = user.email; }
+  $('#user-dialog').showModal(); form.elements.name.focus();
+}
 function confirmAction(message, actionLabel = 'Confirmar') {
   return new Promise(resolve => {
     const dialog = $('#confirm-dialog'); $('#confirm-message').textContent = message; $('#confirm-ok').textContent = actionLabel;
@@ -176,7 +234,7 @@ function exportCsv() {
 }
 function startDemo() {
   if (demo) { location.hash = 'overview'; return; }
-  realState = state; demo = true; state = structuredClone(state); state.transactions = []; state.budgets = [];
+  realState = state; demo = true; state = structuredClone(state); state.transactions = []; state.budgets = []; state.installments = [];
   // Usa as categorias iniciais mesmo após a restauração de um backup personalizado.
   const demoCategories = [{ id:'salario',name:'Salário',color:'#17876b' },{id:'freelance',name:'Freelance',color:'#5277cf'},{id:'moradia',name:'Moradia',color:'#397a69'},{id:'alimentacao',name:'Alimentação',color:'#e1a34b'},{id:'transporte',name:'Transporte',color:'#6387cb'},{id:'saude',name:'Saúde',color:'#b97ab2'},{id:'lazer',name:'Lazer',color:'#d47c62'},{id:'educacao',name:'Educação',color:'#779853'},{id:'outros',name:'Outros',color:'#80908c'}];
   state.categories = demoCategories;
@@ -212,6 +270,19 @@ $('#budget-form').addEventListener('submit', async event => {
   try { await mutate('/budgets', 'PUT', { month, category: form.elements.category.value, amount: toCents(form.elements.amount.value) }, 'Orçamento salvo.'); $('#budget-dialog').close(); }
   catch (error) { form.querySelector('.form-error').textContent = error.message; } finally { button.disabled = false; }
 });
+$('#installment-form').addEventListener('input', updateInstallmentPreview);
+$('#installment-form').addEventListener('submit', async event => {
+  event.preventDefault(); if (!ensureReal()) return; const form = event.currentTarget; const button = form.querySelector('.primary'); button.disabled = true;
+  try { await mutate('/installments', 'POST', { description: form.elements.description.value, totalAmount: toCents(form.elements.totalAmount.value), installmentCount: Number(form.elements.installmentCount.value), startMonth: form.elements.startMonth.value, dueDay: Number(form.elements.dueDay.value), category: form.elements.category.value }, 'Compra parcelada adicionada.'); $('#installment-dialog').close(); }
+  catch (error) { form.querySelector('.form-error').textContent = error.message; } finally { button.disabled = false; }
+});
+$('#planner-form').addEventListener('input', updatePlanner);
+$('#planner-form').querySelector('[data-action="save-simulation"]').addEventListener('click', () => { const form = $('#planner-form'); const prefill = { description: form.elements.description.value, totalAmount: form.elements.financedAmount.value, installmentCount: Number(form.elements.installmentCount.value) }; $('#planner-dialog').close(); openInstallment(prefill); });
+$('#user-form').addEventListener('submit', async event => {
+  event.preventDefault(); const form = event.currentTarget; const button = form.querySelector('.primary'); button.disabled = true;
+  try { const fields = Object.fromEntries(new FormData(form)); const id = fields.id; delete fields.id; await request(id ? `/admin/users/${id}` : '/admin/users', id ? 'PUT' : 'POST', fields); if (id === currentUser.id) { currentUser = await request('/me'); updateLoggedUser(); } adminUsers = await request('/admin/users'); form.closest('dialog').close(); render(); toast(id ? 'Usuário atualizado.' : 'Usuário criado.'); }
+  catch (error) { form.querySelector('.form-error').textContent = error.message; } finally { button.disabled = false; }
+});
 $('#page-content').addEventListener('input', event => {
   if (event.target.id === 'search') { filter.search = event.target.value; filter.page = 1; $('#transactions-result').innerHTML = transactionsResult(); }
 });
@@ -238,6 +309,10 @@ $('#page-content').addEventListener('click', async event => {
   const button = event.target.closest('[data-action]'); if (!button) return; const { action, id } = button.dataset;
   if (action === 'new' || action === 'edit') return openTransaction(id);
   if (action === 'budget') return openBudget(id);
+  if (action === 'installment') return openInstallment();
+  if (action === 'planner') return openPlanner();
+  if (action === 'new-user' || action === 'edit-user') return openUser(id);
+  if (action === 'reload-users') { adminUsers = null; return render(); }
   if (action === 'demo') return startDemo();
   if (action === 'csv') return exportCsv();
   if (action === 'previous' || action === 'next') { filter.page += action === 'next' ? 1 : -1; $('#transactions-result').innerHTML = transactionsResult(); return; }
@@ -247,6 +322,7 @@ $('#page-content').addEventListener('click', async event => {
     if (action === 'delete') { const item = state.transactions.find(t => t.id === id); if (await confirmAction(`Excluir “${item.description}”, no valor de ${money(item.amount)}?`, 'Excluir lançamento')) await mutate(`/transactions/${id}`, 'DELETE', {}, 'Lançamento excluído.'); }
     if (action === 'settle') { const item = state.transactions.find(t => t.id === id); await mutate(`/transactions/${id}`, 'PUT', { ...item, status: 'paid' }, 'Lançamento efetivado.'); }
     if (action === 'delete-budget' && await confirmAction('Remover este limite mensal? Seus lançamentos serão mantidos.', 'Remover limite')) await mutate('/budgets', 'DELETE', { month, category: id }, 'Limite removido.');
+    if (action === 'delete-installment') { const item = state.installments.find(entry => entry.id === id); if (await confirmAction(`Excluir o parcelamento de “${item.description}”?`, 'Excluir parcelamento')) await mutate(`/installments/${id}`, 'DELETE', {}, 'Parcelamento excluído.'); }
     if (action === 'backup') { const backup = await request('/backup'); download(JSON.stringify(backup, null, 2), `nexora-backup-${today()}.json`, 'application/json'); toast('Backup exportado.'); }
     if (action === 'restore') $('#backup-file').click();
     if (action === 'retry') { state = await request(); render(); }
@@ -274,6 +350,7 @@ function updateLoggedUser() {
     sidebarAvatar.textContent = 'EU';
     sidebarUserName.textContent = 'Minhas finanças';
     sidebarUserEmail.textContent = 'Espaço pessoal';
+    $('#admin-nav').hidden = true;
     return;
   }
   const strong = document.createElement('strong');
@@ -287,6 +364,7 @@ function updateLoggedUser() {
   sidebarAvatar.textContent = initials || 'EU';
   sidebarUserName.textContent = currentUser.name;
   sidebarUserEmail.textContent = currentUser.email || 'Perfil pessoal';
+  $('#admin-nav').hidden = !currentUser.isAdmin;
 }
 
 function showLogin(message = '') {

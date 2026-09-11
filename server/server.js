@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { createRepository } from './repository.js';
-import { requireValue, validateTransaction, validateBudget, validateBackup } from './domain.js';
+import { requireValue, validateTransaction, validateBudget, validateInstallment, validateBackup } from './domain.js';
 
 const publicDirectory = fileURLToPath(new URL('../public/', import.meta.url));
 const port = Number(process.env.PORT || 3000);
@@ -42,8 +42,24 @@ function publicUser(user) {
   const name = [metadata.full_name, metadata.name, metadata.display_name]
     .find(value => typeof value === 'string' && value.trim())?.trim().slice(0, 80);
   const email = typeof user.email === 'string' ? user.email.trim().slice(0, 254) : '';
-  return { id: user.id, name: name || email || 'Usuário Nexora', email };
+  return { id: user.id, name: name || email || 'Usuário Nexora', email, isAdmin: user.app_metadata?.role === 'admin' };
 }
+function requireAdmin(user) { if (user.app_metadata?.role !== 'admin') throw fail(403, 'Acesso exclusivo do administrador.'); }
+async function adminCall(path, options = {}) {
+  let response;
+  try {
+    response = await fetch(supabaseUrl + '/auth/v1/admin' + path, {
+      ...options,
+      headers: { apikey: secretKey, Authorization: 'Bearer ' + secretKey, 'Content-Type': 'application/json', ...options.headers },
+      signal: AbortSignal.timeout(15000)
+    });
+  } catch { throw fail(503, 'Administração de usuários temporariamente indisponível.'); }
+  let result = {};
+  try { result = await response.json(); } catch { /* respostas vazias são permitidas */ }
+  if (!response.ok) throw fail(response.status === 422 ? 400 : response.status, result.msg || result.message || result.error || 'Não foi possível administrar o usuário.');
+  return result;
+}
+const cleanAdminUser = user => ({ id: user.id, email: user.email || '', name: publicUser(user).name, createdAt: user.created_at || '', lastSignInAt: user.last_sign_in_at || '', isAdmin: user.app_metadata?.role === 'admin' });
 const assets = {
   '/': ['index.html', 'text/html'], '/index.html': ['index.html', 'text/html'],
   '/styles.css': ['styles.css', 'text/css'], '/app.js': ['app.js', 'text/javascript'],
@@ -94,12 +110,37 @@ const server = createServer(async (request, response) => {
     const user = await requireAuthenticatedUser(request);
     requireValue(!url.searchParams.has('user_id') && !url.searchParams.has('userId'), 'O usuário é definido pela sessão.');
     if (request.method === 'GET' && url.pathname === '/api/me') return json(response, 200, publicUser(user));
+    if (request.method === 'GET' && url.pathname === '/api/admin/users') {
+      requireAdmin(user);
+      const result = await adminCall('/users?page=1&per_page=1000');
+      return json(response, 200, (result.users || []).map(cleanAdminUser));
+    }
     if (request.method === 'GET' && ['/api/state', '/api/backup'].includes(url.pathname)) {
       if (url.pathname === '/api/backup') response.setHeader('Content-Disposition', 'attachment; filename="nexora-backup.json"');
       return json(response, 200, await repository.readState(user.id));
     }
     const value = await body(request);
+    if (url.pathname === '/api/admin/users' && request.method === 'POST') {
+      requireAdmin(user);
+      requireValue(typeof value.email === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.email) && value.email.length <= 254, 'E-mail inválido.');
+      requireValue(typeof value.name === 'string' && value.name.trim().length > 0 && value.name.trim().length <= 80, 'Nome inválido.');
+      requireValue(typeof value.password === 'string' && value.password.length >= 8 && value.password.length <= 128, 'A senha temporária deve ter entre 8 e 128 caracteres.');
+      const created = await adminCall('/users', { method: 'POST', body: JSON.stringify({ email: value.email.trim().toLowerCase(), password: value.password, email_confirm: true, user_metadata: { full_name: value.name.trim() } }) });
+      return json(response, 201, cleanAdminUser(created));
+    }
+    const adminId = url.pathname.match(/^\/api\/admin\/users\/([0-9a-f-]{36})$/i)?.[1];
+    if (adminId && request.method === 'PUT') {
+      requireAdmin(user);
+      requireValue(typeof value.email === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.email) && value.email.length <= 254, 'E-mail inválido.');
+      requireValue(typeof value.name === 'string' && value.name.trim().length > 0 && value.name.trim().length <= 80, 'Nome inválido.');
+      requireValue(value.password === '' || (typeof value.password === 'string' && value.password.length >= 8 && value.password.length <= 128), 'A nova senha deve ter entre 8 e 128 caracteres.');
+      const fields = { email: value.email.trim().toLowerCase(), email_confirm: true, user_metadata: { full_name: value.name.trim() } };
+      if (value.password) fields.password = value.password;
+      const updated = await adminCall('/users/' + adminId, { method: 'PUT', body: JSON.stringify(fields) });
+      return json(response, 200, cleanAdminUser(updated));
+    }
     const id = url.pathname.match(/^\/api\/transactions\/([a-zA-Z0-9-]+)$/)?.[1];
+    const installmentId = url.pathname.match(/^\/api\/installments\/([a-zA-Z0-9-]+)$/)?.[1];
     const newId = randomUUID();
     const saved = await repository.updateState(user.id, state => {
       if (url.pathname === '/api/transactions' && request.method === 'POST') {
@@ -121,6 +162,12 @@ const server = createServer(async (request, response) => {
         requireValue(!state.categories.some(c => c.name.toLowerCase() === value.name.trim().toLowerCase()), 'Essa categoria já existe.');
         requireValue(typeof value.color === 'string' && /^#[a-fA-F0-9]{6}$/.test(value.color), 'Cor inválida.');
         state.categories.push({ id: newId, name: value.name.trim(), color: value.color });
+      } else if (url.pathname === '/api/installments' && request.method === 'POST') {
+        state.installments.push({ id: newId, ...validateInstallment(value, state.categories) });
+      } else if (installmentId && request.method === 'DELETE') {
+        const index = state.installments.findIndex(item => item.id === installmentId);
+        if (index === -1) throw fail(404, 'Compra parcelada não encontrada.');
+        state.installments.splice(index, 1);
       } else if (url.pathname === '/api/restore' && request.method === 'POST') return validateBackup(value);
       else throw fail(404, 'Operação não encontrada.');
       return state;

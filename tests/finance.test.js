@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { toCents, totals } from '../public/finance.js';
-import { emptyState, validateBackup, validateTransaction, validDate } from '../server/domain.js';
+import { emptyState, validateBackup, validateTransaction, validateInstallment, validDate } from '../server/domain.js';
 
 test('dinheiro é convertido para centavos sem formatos ambíguos', () => {
   assert.equal(toCents('0,10') + toCents('0,20'), 30);
@@ -30,4 +30,11 @@ test('backup rejeita registros duplicados e referências inexistentes', () => {
   assert.throws(() => validateBackup({ ...data, transactions:[row,row] }));
   assert.throws(() => validateTransaction({ ...row, category:'inexistente' }, data.categories));
   assert.throws(() => validateTransaction({ ...row, amount:0.1 }, data.categories));
+});
+test('parcelamentos exigem valor, prazo, vencimento e categoria válidos', () => {
+  const state = emptyState();
+  const item = validateInstallment({ description:'Notebook',totalAmount:600000,installmentCount:12,startMonth:'2026-09',dueDay:10,category:'outros' }, state.categories);
+  assert.equal(item.installmentCount, 12);
+  assert.throws(() => validateInstallment({ ...item, installmentCount:1 }, state.categories));
+  assert.throws(() => validateInstallment({ ...item, dueDay:31 }, state.categories));
 });

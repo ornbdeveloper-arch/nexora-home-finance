@@ -10,7 +10,7 @@ export const defaultCategories = [
   { id: 'educacao', name: 'Educação', color: '#779853' },
   { id: 'outros', name: 'Outros', color: '#80908c' }
 ];
-export const emptyState = () => ({ version: 1, transactions: [], budgets: [], categories: structuredClone(defaultCategories) });
+export const emptyState = () => ({ version: 1, transactions: [], budgets: [], installments: [], categories: structuredClone(defaultCategories) });
 export function requireValue(condition, message) {
   if (!condition) { const error = new Error(message); error.status = 400; throw error; }
 }
@@ -36,6 +36,16 @@ export function validateBudget(value, categories) {
   requireValue(Number.isSafeInteger(value.amount) && value.amount > 0 && value.amount <= 100000000000, 'Limite inválido.');
   return { month: value.month, category: value.category, amount: value.amount };
 }
+export function validateInstallment(value, categories) {
+  requireValue(value && typeof value === 'object', 'Compra parcelada inválida.');
+  requireValue(typeof value.description === 'string' && value.description.trim().length > 0 && value.description.trim().length <= 120, 'Informe uma descrição de até 120 caracteres.');
+  requireValue(Number.isSafeInteger(value.totalAmount) && value.totalAmount > 0 && value.totalAmount <= 100000000000, 'Informe o valor total da compra.');
+  requireValue(Number.isSafeInteger(value.installmentCount) && value.installmentCount >= 2 && value.installmentCount <= 120, 'Escolha entre 2 e 120 parcelas.');
+  requireValue(typeof value.startMonth === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(value.startMonth), 'Mês inicial inválido.');
+  requireValue(Number.isSafeInteger(value.dueDay) && value.dueDay >= 1 && value.dueDay <= 28, 'O vencimento deve ficar entre os dias 1 e 28.');
+  requireValue(categories.some(c => c.id === value.category), 'Categoria inválida.');
+  return { description: value.description.trim(), totalAmount: value.totalAmount, installmentCount: value.installmentCount, startMonth: value.startMonth, dueDay: value.dueDay, category: value.category };
+}
 export function validateBackup(value) {
   requireValue(value?.version === 1 && Array.isArray(value.transactions) && Array.isArray(value.categories) && Array.isArray(value.budgets), 'Arquivo de backup incompatível.');
   requireValue(value.transactions.length <= 50000 && value.categories.length > 0 && value.categories.length <= 100 && value.budgets.length <= 10000, 'Backup excede os limites permitidos.');
@@ -52,5 +62,11 @@ export function validateBackup(value) {
   });
   ids.clear();
   const budgets = value.budgets.map(b => { const result = validateBudget(b, categories); const key = b.month + b.category; requireValue(!ids.has(key), 'Orçamento duplicado.'); ids.add(key); return result; });
-  return { version: 1, categories, transactions, budgets };
+  ids.clear();
+  const installments = (value.installments || []).map(item => {
+    requireValue(item && typeof item.id === 'string' && /^[a-zA-Z0-9-]{1,80}$/.test(item.id) && !ids.has(item.id), 'Identificador de parcelamento inválido ou duplicado.');
+    ids.add(item.id); return { id: item.id, ...validateInstallment(item, categories) };
+  });
+  requireValue(installments.length <= 10000, 'Backup excede os limites permitidos.');
+  return { version: 1, categories, transactions, budgets, installments };
 }

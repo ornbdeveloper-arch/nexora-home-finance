@@ -17,6 +17,7 @@
 * {
   box-sizing:border-box;
 }
+[hidden] { display:none !important; }
 
 body {
   margin:0;
@@ -1785,5 +1786,48 @@ th {
     padding:6px 10px;
     font-size:.75rem;
   }
+}
+
+.purchase-planner,.commitment-hero {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:24px;
+  margin-bottom:24px;
+}
+.purchase-planner p { margin:6px 0 0; color:var(--muted); }
+.commitment-hero {
+  padding:26px 30px;
+  border-radius:16px;
+  background:linear-gradient(125deg,#173f35,#246652);
+  color:white;
+}
+.commitment-hero div { display:grid; gap:5px; }
+.commitment-hero .eyebrow { color:#bde6d3; }
+.commitment-hero strong { font-family:Georgia,serif; font-size:2.25rem; }
+.commitment-hero span { color:#d4e8df; }
+.installment-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px; }
+.installment-card h2 { margin:10px 0 0; }
+.installment-amount { display:flex; align-items:baseline; gap:8px; margin:22px 0; }
+.installment-amount strong { font-family:Georgia,serif; font-size:1.7rem; color:var(--green); }
+.installment-amount span { color:var(--muted); }
+.installment-card dl { display:grid; gap:9px; margin:0; }
+.installment-card dl div { display:flex; justify-content:space-between; gap:15px; padding-top:9px; border-top:1px solid var(--border); }
+.installment-card dt { color:var(--muted); }
+.installment-card dd { margin:0; text-align:right; font-weight:600; }
+.row-delete { width:36px; height:36px; padding:8px; border:0; border-radius:9px; background:transparent; color:var(--muted); cursor:pointer; }
+.row-delete:hover { background:#fbeceb; color:#a33; }
+.row-delete svg { width:18px; }
+.form-preview { display:flex; justify-content:space-between; gap:15px; padding:14px; border-radius:10px; background:#eef6f2; color:var(--green); }
+.form-preview span { color:var(--muted); }
+.planner-result { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:6px; }
+.comparison-card { min-height:125px; padding:16px; border:1px solid var(--border); border-radius:12px; background:#f8faf8; }
+.comparison-card > span { font-size:.72rem; font-weight:700; letter-spacing:.08em; color:var(--muted); }
+.comparison-card > strong { display:block; margin:9px 0; font-size:1.2rem; color:var(--green); }
+.comparison-card p,.comparison-card small { margin:0; color:var(--muted); }
+
+@media(max-width:800px) {
+  .installment-grid,.planner-result { grid-template-columns:1fr; }
+  .purchase-planner,.commitment-hero { align-items:flex-start; flex-direction:column; }
 }
 

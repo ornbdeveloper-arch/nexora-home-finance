@@ -19,9 +19,21 @@ async function mockSupabase() {
     };
     if (url.pathname === '/auth/v1/user') {
       const token = request.headers.authorization?.replace('Bearer ', '');
-      if (token === 'token-a') return reply(200, { id: ids.a, email: 'ana@example.com', user_metadata: { full_name: 'Ana Silva', internal_role: 'admin' } });
+      if (token === 'token-a') return reply(200, { id: ids.a, email: 'ana@example.com', user_metadata: { full_name: 'Ana Silva', internal_role: 'admin' }, app_metadata: { role: 'admin' } });
       if (token === 'token-b') return reply(200, { id: ids.b, email: 'bruno@example.com', user_metadata: {} });
       return reply(401, { error: 'invalid token' });
+    }
+    if (url.pathname === '/auth/v1/admin/users' && request.method === 'GET') return reply(200, { users: [
+      { id: ids.a, email: 'ana@example.com', user_metadata: { full_name: 'Ana Silva' }, app_metadata: { role: 'admin' }, created_at: '2026-01-01T00:00:00Z' },
+      { id: ids.b, email: 'bruno@example.com', user_metadata: {}, app_metadata: {}, created_at: '2026-01-02T00:00:00Z' }
+    ] });
+    if (url.pathname === '/auth/v1/admin/users' && request.method === 'POST') {
+      const chunks = []; for await (const chunk of request) chunks.push(chunk); const value = JSON.parse(Buffer.concat(chunks).toString());
+      return reply(200, { id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', email: value.email, user_metadata: value.user_metadata, app_metadata: {}, created_at: '2026-01-03T00:00:00Z' });
+    }
+    if (url.pathname === '/auth/v1/admin/users/' + ids.b && request.method === 'PUT') {
+      const chunks = []; for await (const chunk of request) chunks.push(chunk); const value = JSON.parse(Buffer.concat(chunks).toString());
+      return reply(200, { id: ids.b, email: value.email, user_metadata: value.user_metadata, app_metadata: {}, created_at: '2026-01-02T00:00:00Z' });
     }
     if (url.pathname !== '/rest/v1/nexora_state' || request.headers.apikey !== 'sb_secret_test') return reply(403, {});
     const userFilter = url.searchParams.get('user_id');
@@ -95,8 +107,17 @@ test('API exige autenticação e isola todo o CRUD por usuário', async () => {
     assert.equal((await api('/state')).status, 401);
     assert.equal((await api('/state', 'expired')).status, 401);
     assert.equal((await api('/transactions', undefined, 'POST', {})).status, 401);
-    assert.deepEqual((await api('/me', 'token-a')).data, { id: ids.a, name: 'Ana Silva', email: 'ana@example.com' });
-    assert.deepEqual((await api('/me', 'token-b')).data, { id: ids.b, name: 'bruno@example.com', email: 'bruno@example.com' });
+    assert.deepEqual((await api('/me', 'token-a')).data, { id: ids.a, name: 'Ana Silva', email: 'ana@example.com', isAdmin: true });
+    assert.deepEqual((await api('/me', 'token-b')).data, { id: ids.b, name: 'bruno@example.com', email: 'bruno@example.com', isAdmin: false });
+    assert.equal((await api('/admin/users', 'token-b')).status, 403);
+    const users = (await api('/admin/users', 'token-a')).data;
+    assert.equal(users.length, 2);
+    assert.deepEqual(Object.keys(users[0]), ['id', 'email', 'name', 'createdAt', 'lastSignInAt', 'isAdmin']);
+    assert.equal((await api('/admin/users', 'token-b', 'POST', { name:'Novo',email:'novo@example.com',password:'12345678' })).status, 403);
+    const createdUser = await api('/admin/users', 'token-a', 'POST', { name:'Novo',email:'novo@example.com',password:'12345678' });
+    assert.equal(createdUser.status, 201); assert.equal(createdUser.data.name, 'Novo');
+    const updatedUser = await api('/admin/users/' + ids.b, 'token-a', 'PUT', { name:'Bruno',email:'novo-bruno@example.com',password:'' });
+    assert.equal(updatedUser.data.email, 'novo-bruno@example.com'); assert.equal(updatedUser.data.name, 'Bruno');
 
     let a = (await api('/state', 'token-a')).data;
     let b = (await api('/state', 'token-b')).data;
@@ -127,6 +148,13 @@ test('API exige autenticação e isola todo o CRUD por usuário', async () => {
     assert.equal(a.budgets.length, 0);
     a = (await api('/categories', 'token-a', 'POST', { name: 'Pets', color: '#112233' })).data;
     assert.equal(a.categories.at(-1).name, 'Pets');
+    a = (await api('/installments', 'token-a', 'POST', { description: 'Notebook', totalAmount: 600000, installmentCount: 12, startMonth: '2026-09', dueDay: 10, category: 'outros' })).data;
+    assert.equal(a.installments[0].description, 'Notebook');
+    assert.equal(a.installments[0].installmentCount, 12);
+    assert.equal((await api('/state', 'token-b')).data.installments.length, 0);
+    const installmentId = a.installments[0].id;
+    a = (await api('/installments/' + installmentId, 'token-a', 'DELETE', {})).data;
+    assert.equal(a.installments.length, 0);
 
     const backup = (await api('/backup', 'token-a')).data;
     a = (await api('/transactions/' + aId, 'token-a', 'DELETE', {})).data;

@@ -64,11 +64,14 @@ Não coloque a secret key em arquivos públicos nem em variáveis com prefixos d
 
 ## API
 
-`amount` é inteiro em **centavos**; datas são `YYYY-MM-DD`; meses, `YYYY-MM`. O estado tem `version`, `transactions`, `categories` e `budgets`.
+Valores monetários são inteiros em **centavos**; datas são `YYYY-MM-DD`; meses, `YYYY-MM`. O estado tem `version`, `transactions`, `categories`, `budgets` e `installments`.
 
 | Método e rota | Função |
 | --- | --- |
 | `GET /api/me` | Ler nome e e-mail do usuário autenticado |
+| `GET /api/admin/users` | Listar usuários (somente administrador) |
+| `POST /api/admin/users` | Criar usuário (somente administrador) |
+| `PUT /api/admin/users/:id` | Alterar nome, e-mail ou senha (somente administrador) |
 | `GET /api/state` | Ler dados |
 | `POST /api/transactions` | Criar lançamento |
 | `PUT /api/transactions/:id` | Editar lançamento |
@@ -76,10 +79,14 @@ Não coloque a secret key em arquivos públicos nem em variáveis com prefixos d
 | `PUT /api/budgets` | Criar/atualizar limite por mês e categoria |
 | `DELETE /api/budgets` | Remover limite |
 | `POST /api/categories` | Adicionar categoria |
+| `POST /api/installments` | Adicionar compra parcelada |
+| `DELETE /api/installments/:id` | Excluir compra parcelada |
 | `GET /api/backup` | Exportar estado |
 | `POST /api/restore` | Validar e substituir estado |
 
 O nome exibido vem de `user_metadata.full_name`, `name` ou `display_name` no usuário do Supabase. Se nenhum desses campos estiver preenchido, a interface mostra o e-mail.
+
+A área **Usuários** só aparece para contas com `app_metadata.role` igual a `admin`. As operações administrativas são validadas novamente no backend; esconder o menu não é usado como controle de acesso.
 
 Exemplo:
 

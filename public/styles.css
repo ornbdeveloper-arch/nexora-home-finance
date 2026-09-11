@@ -1818,6 +1818,9 @@ th {
 .row-delete { width:36px; height:36px; padding:8px; border:0; border-radius:9px; background:transparent; color:var(--muted); cursor:pointer; }
 .row-delete:hover { background:#fbeceb; color:#a33; }
 .row-delete svg { width:18px; }
+.category-item { position:relative; }
+.category-delete { position:absolute; top:14px; right:14px; }
+.category-required { font-size:.72rem; color:var(--muted); }
 .form-preview { display:flex; justify-content:space-between; gap:15px; padding:14px; border-radius:10px; background:#eef6f2; color:var(--green); }
 .form-preview span { color:var(--muted); }
 .planner-result { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:6px; }

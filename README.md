@@ -79,6 +79,7 @@ Valores monetários são inteiros em **centavos**; datas são `YYYY-MM-DD`; mese
 | `PUT /api/budgets` | Criar/atualizar limite por mês e categoria |
 | `DELETE /api/budgets` | Remover limite |
 | `POST /api/categories` | Adicionar categoria |
+| `DELETE /api/categories/:id` | Remover categoria e reatribuir registros a Outros |
 | `POST /api/installments` | Adicionar compra parcelada |
 | `DELETE /api/installments/:id` | Excluir compra parcelada |
 | `GET /api/backup` | Exportar estado |

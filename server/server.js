@@ -141,6 +141,7 @@ const server = createServer(async (request, response) => {
     }
     const id = url.pathname.match(/^\/api\/transactions\/([a-zA-Z0-9-]+)$/)?.[1];
     const installmentId = url.pathname.match(/^\/api\/installments\/([a-zA-Z0-9-]+)$/)?.[1];
+    const categoryId = url.pathname.match(/^\/api\/categories\/([a-zA-Z0-9-]+)$/)?.[1];
     const newId = randomUUID();
     const saved = await repository.updateState(user.id, state => {
       if (url.pathname === '/api/transactions' && request.method === 'POST') {
@@ -162,6 +163,13 @@ const server = createServer(async (request, response) => {
         requireValue(!state.categories.some(c => c.name.toLowerCase() === value.name.trim().toLowerCase()), 'Essa categoria já existe.');
         requireValue(typeof value.color === 'string' && /^#[a-fA-F0-9]{6}$/.test(value.color), 'Cor inválida.');
         state.categories.push({ id: newId, name: value.name.trim(), color: value.color });
+      } else if (categoryId && request.method === 'DELETE') {
+        requireValue(categoryId !== 'outros', 'A categoria Outros é necessária e não pode ser removida.');
+        requireValue(state.categories.some(category => category.id === categoryId), 'Categoria não encontrada.');
+        state.transactions = state.transactions.map(item => item.category === categoryId ? { ...item, category: 'outros' } : item);
+        state.installments = state.installments.map(item => item.category === categoryId ? { ...item, category: 'outros' } : item);
+        state.budgets = state.budgets.filter(item => item.category !== categoryId);
+        state.categories = state.categories.filter(category => category.id !== categoryId);
       } else if (url.pathname === '/api/installments' && request.method === 'POST') {
         state.installments.push({ id: newId, ...validateInstallment(value, state.categories) });
       } else if (installmentId && request.method === 'DELETE') {

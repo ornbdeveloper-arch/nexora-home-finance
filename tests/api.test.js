@@ -19,8 +19,8 @@ async function mockSupabase() {
     };
     if (url.pathname === '/auth/v1/user') {
       const token = request.headers.authorization?.replace('Bearer ', '');
-      if (token === 'token-a') return reply(200, { id: ids.a });
-      if (token === 'token-b') return reply(200, { id: ids.b });
+      if (token === 'token-a') return reply(200, { id: ids.a, email: 'ana@example.com', user_metadata: { full_name: 'Ana Silva', internal_role: 'admin' } });
+      if (token === 'token-b') return reply(200, { id: ids.b, email: 'bruno@example.com', user_metadata: {} });
       return reply(401, { error: 'invalid token' });
     }
     if (url.pathname !== '/rest/v1/nexora_state' || request.headers.apikey !== 'sb_secret_test') return reply(403, {});
@@ -95,6 +95,8 @@ test('API exige autenticação e isola todo o CRUD por usuário', async () => {
     assert.equal((await api('/state')).status, 401);
     assert.equal((await api('/state', 'expired')).status, 401);
     assert.equal((await api('/transactions', undefined, 'POST', {})).status, 401);
+    assert.deepEqual((await api('/me', 'token-a')).data, { id: ids.a, name: 'Ana Silva', email: 'ana@example.com' });
+    assert.deepEqual((await api('/me', 'token-b')).data, { id: ids.b, name: 'bruno@example.com', email: 'bruno@example.com' });
 
     let a = (await api('/state', 'token-a')).data;
     let b = (await api('/state', 'token-b')).data;

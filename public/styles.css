@@ -1748,13 +1748,19 @@ th {
   display:none;
 }
 .logged-user {
-  max-width: 180px;
+  display:flex;
+  flex-direction:column;
+  max-width: 220px;
   overflow: hidden;
   color: var(--muted);
-  font-size: 0.75rem;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
+.logged-user strong,.logged-user small {
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.logged-user strong { color:var(--text); font-size:.78rem; }
+.logged-user small { font-size:.68rem; }
 
 .logout-button {
   padding: 7px 12px;
@@ -1771,9 +1777,10 @@ th {
 }
 
 @media(max-width:700px) {
-  .logged-user,.top-right .storage-label {
+  .top-right .storage-label,.logged-user small {
     display:none;
   }
+  .logged-user { max-width:110px; }
   .logout-button {
     padding:6px 10px;
     font-size:.75rem;

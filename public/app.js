@@ -1,5 +1,5 @@
 import { request } from './api.js';
-import { login, logout, isAuthenticated, getUserId } from './auth.js';
+import { login, logout, isAuthenticated } from './auth.js';
 import { money, toCents, sum, totals } from './finance.js';
 
 // 1. Estado da interface. Os dados reais vêm sempre do servidor.
@@ -7,6 +7,7 @@ const $ = selector => document.querySelector(selector);
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 let state = null;
 let realState = null;
+let currentUser = null;
 let demo = false;
 let month = today().slice(0, 7);
 let page = 'overview';
@@ -256,25 +257,42 @@ const loginDialog = $('#login-dialog');
 const loginForm = $('#login-form');
 const logoutButton = $('#logout-button');
 const loggedUser = $('#logged-user');
+const topbarAvatar = $('#topbar-avatar');
+const sidebarAvatar = $('#sidebar-avatar');
+const sidebarUserName = $('#sidebar-user-name');
+const sidebarUserEmail = $('#sidebar-user-email');
 loginDialog.addEventListener('cancel', event => event.preventDefault());
 loginDialog.addEventListener('close', () => {
   if (!isAuthenticated()) queueMicrotask(() => loginDialog.showModal());
 });
 
 function updateLoggedUser() {
-  const userId = getUserId();
-  if (!userId) {
-    loggedUser.textContent = '';
-    loggedUser.title = '';
+  if (!currentUser) {
+    loggedUser.replaceChildren();
+    loggedUser.removeAttribute('title');
+    topbarAvatar.textContent = 'EU';
+    sidebarAvatar.textContent = 'EU';
+    sidebarUserName.textContent = 'Minhas finanças';
+    sidebarUserEmail.textContent = 'Espaço pessoal';
     return;
   }
-  loggedUser.textContent = `Usuário: ${userId.slice(0, 8)}…${userId.slice(-4)}`;
-  loggedUser.title = userId;
+  const strong = document.createElement('strong');
+  const small = document.createElement('small');
+  strong.textContent = currentUser.name;
+  small.textContent = currentUser.email && currentUser.email !== currentUser.name ? currentUser.email : 'Perfil pessoal';
+  loggedUser.replaceChildren(strong, small);
+  loggedUser.title = `${currentUser.name}${currentUser.email ? `\n${currentUser.email}` : ''}\nID: ${currentUser.id}`;
+  const initials = currentUser.name.split(/\s+/).slice(0, 2).map(part => part[0]).join('').toUpperCase();
+  topbarAvatar.textContent = initials || 'EU';
+  sidebarAvatar.textContent = initials || 'EU';
+  sidebarUserName.textContent = currentUser.name;
+  sidebarUserEmail.textContent = currentUser.email || 'Perfil pessoal';
 }
 
 function showLogin(message = '') {
   state = null;
   realState = null;
+  currentUser = null;
   demo = false;
   updateLoggedUser();
   $('#demo-banner').hidden = true;
@@ -284,7 +302,9 @@ function showLogin(message = '') {
 }
 
 async function loadApplication() {
-  state = await request();
+  const [nextState, user] = await Promise.all([request(), request('/me')]);
+  state = nextState;
+  currentUser = user;
   updateLoggedUser();
   render();
 }

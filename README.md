@@ -68,6 +68,7 @@ Não coloque a secret key em arquivos públicos nem em variáveis com prefixos d
 
 | Método e rota | Função |
 | --- | --- |
+| `GET /api/me` | Ler nome e e-mail do usuário autenticado |
 | `GET /api/state` | Ler dados |
 | `POST /api/transactions` | Criar lançamento |
 | `PUT /api/transactions/:id` | Editar lançamento |
@@ -77,6 +78,8 @@ Não coloque a secret key em arquivos públicos nem em variáveis com prefixos d
 | `POST /api/categories` | Adicionar categoria |
 | `GET /api/backup` | Exportar estado |
 | `POST /api/restore` | Validar e substituir estado |
+
+O nome exibido vem de `user_metadata.full_name`, `name` ou `display_name` no usuário do Supabase. Se nenhum desses campos estiver preenchido, a interface mostra o e-mail.
 
 Exemplo:
 

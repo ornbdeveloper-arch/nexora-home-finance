@@ -37,6 +37,13 @@ async function requireAuthenticatedUser(request) {
   if (typeof user.id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(user.id)) throw fail(401, 'Usuário inválido.');
   return user;
 }
+function publicUser(user) {
+  const metadata = user.user_metadata && typeof user.user_metadata === 'object' ? user.user_metadata : {};
+  const name = [metadata.full_name, metadata.name, metadata.display_name]
+    .find(value => typeof value === 'string' && value.trim())?.trim().slice(0, 80);
+  const email = typeof user.email === 'string' ? user.email.trim().slice(0, 254) : '';
+  return { id: user.id, name: name || email || 'Usuário Nexora', email };
+}
 const assets = {
   '/': ['index.html', 'text/html'], '/index.html': ['index.html', 'text/html'],
   '/styles.css': ['styles.css', 'text/css'], '/app.js': ['app.js', 'text/javascript'],
@@ -86,6 +93,7 @@ const server = createServer(async (request, response) => {
     }
     const user = await requireAuthenticatedUser(request);
     requireValue(!url.searchParams.has('user_id') && !url.searchParams.has('userId'), 'O usuário é definido pela sessão.');
+    if (request.method === 'GET' && url.pathname === '/api/me') return json(response, 200, publicUser(user));
     if (request.method === 'GET' && ['/api/state', '/api/backup'].includes(url.pathname)) {
       if (url.pathname === '/api/backup') response.setHeader('Content-Disposition', 'attachment; filename="nexora-backup.json"');
       return json(response, 200, await repository.readState(user.id));

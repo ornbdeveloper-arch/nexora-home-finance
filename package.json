@@ -1,0 +1,9 @@
+{
+  "name": "nexora-financas",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Gestor financeiro em HTML, CSS e JavaScript, sem dependências",
+  "scripts": { "start": "node server/server.js", "test": "node --test tests/*.test.js" },
+  "engines": { "node": ">=22" }
+}

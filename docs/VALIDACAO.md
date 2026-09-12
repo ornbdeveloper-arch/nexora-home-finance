@@ -1,5 +1,12 @@
 # Validação do Nexora
 
+## Cartões, compras e projeção — 12/09/2026
+
+- `node --test tests/*.test.js`: 14 testes aprovados, incluindo API multiusuário, criação/edição de cartões, compra vinculada, pagamento real com vencimento preservado, cálculo do fechamento, projeção e contratos de interface.
+- `node --check public/app.js` e `git diff --check`: sem erros de sintaxe ou espaços inválidos.
+- Prévia local com dados fictícios (`node tests/manual-preview.mjs`): navegação de Cartões, Lançamentos e Agenda; formulário de cartão; alternância entre compra e pagamento; seleção de crédito, cartão e débito; vencimento sugerido; confirmação de pagamento e exibição da data real com vencimento original.
+- Visão geral e cartões inspecionados visualmente em desktop. Os campos de data e mês expostos no HTML têm limites, e o backend valida datas e referências dos cartões. Esta prévia não usa o Supabase real.
+
 ## Validação multiusuário — 11/09/2026
 
 - Autenticação obrigatória em todas as rotas `/api`; token ausente e inválido retornam 401.

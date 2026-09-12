@@ -15,13 +15,17 @@ Abra **http://127.0.0.1:3000**. Não precisa executar `npm install`. O comando `
 ## Usar
 
 1. Escolha o mês e clique em **Novo lançamento**.
-2. Informe receita ou despesa, descrição, valor, data e categoria. Valores aceitam `1250,50` ou `1250.50`, sem separador de milhar.
-3. Use **Efetivado** para dinheiro que já entrou/saiu, e **Pendente** para previsões e contas a pagar/receber. A data representa a movimentação ou o vencimento; ao efetivar um pagamento em outra data, edite também a data.
+2. Informe receita ou despesa, descrição, valor, data e categoria. Valores aceitam `1250,50` ou `1250.50`, sem separador de milhar. Para despesas, escolha crédito, débito ou Pix e informe a data da compra.
+3. Use **Efetivado** para dinheiro que já entrou/saiu, e **Pendente** para previsões e contas a pagar/receber. A data de pagamento/vencimento define em qual mês o lançamento entra. Uma compra no crédito pode ser feita hoje e ficar pendente para o mês seguinte, sem criar parcelamento. Débito e Pix são efetivados na data da compra. Ao efetivar um pagamento em outra data, edite também a data de pagamento.
 4. Em **Lançamentos**, busque, filtre, edite, exclua ou marque uma pendência como efetivada.
-5. Em **Orçamentos**, defina limites por categoria para o mês. Eles consideram despesas pagas **e pendentes**.
-6. Em **Dados e backup**, exporte CSV, baixe um backup JSON ou restaure uma cópia. No celular, o acesso está no rodapé do quadro de últimos lançamentos da Visão geral.
+5. Em **Cartões**, cadastre o dia de fechamento e vencimento. Ao selecionar o cartão em uma compra no crédito, o vencimento é sugerido automaticamente. Compras após o fechamento entram na fatura seguinte; a data sugerida pode ser ajustada. Editar as regras de um cartão não altera compras já registradas.
+6. Em **Lançamentos**, alterne entre a data da compra e a data do pagamento, filtre pelo meio usado e informe a data real ao confirmar um pagamento. A **Agenda** reúne os vencimentos pendentes dos próximos 30 dias.
+7. Em **Orçamentos**, defina limites por categoria para o mês. Eles consideram despesas pagas **e pendentes**.
+8. Em **Dados e backup**, exporte CSV, baixe um backup JSON ou restaure uma cópia. No celular, o acesso está no rodapé do quadro de últimos lançamentos da Visão geral.
 
 O saldo acumulado soma receitas menos despesas efetivadas até o último dia do mês selecionado. Não é um saldo consultado em banco. Para começar com um saldo que já possui, registre uma receita chamada “Saldo inicial” (ou despesa, se negativo), datada antes do mês que deseja acompanhar.
+
+A projeção até o fim do mês combina transações efetivadas, pendências e compromissos de parcelas/recorrências. Se a mesma parcela ou recorrência for cadastrada também como transação, haverá dupla contagem. As reservas informadas em Metas são subtraídas apenas do valor disponível estimado; não alteram o saldo de caixa automaticamente.
 
 O gráfico mostra seis meses e considera apenas efetivados. Os percentuais são arredondados e podem não somar exatamente 100%. O CSV traz o tipo separado e valores positivos.
 
@@ -43,6 +47,7 @@ Leia os arquivos nesta ordem:
 | `server/repository.js` | Persistência individual por usuário no Supabase |
 | `public/auth.js` | Login, sessão, renovação de token e logout |
 | `tests/` | Testes de cálculos e integração com a API |
+| `docs/GUIA_PARA_AGENTES.md` | Contexto completo do produto, arquitetura, modelo e regras para agentes de IA |
 
 O caminho de um cadastro: formulário → `app.js` → `api.js` → rota HTTP → validação → repositório → resposta JSON → atualização da tela.
 
@@ -64,7 +69,7 @@ Não coloque a secret key em arquivos públicos nem em variáveis com prefixos d
 
 ## API
 
-Valores monetários são inteiros em **centavos**; datas são `YYYY-MM-DD`; meses, `YYYY-MM`. O estado tem `version`, `transactions`, `categories`, `budgets` e `installments`.
+Valores monetários são inteiros em **centavos**; datas são `YYYY-MM-DD`; meses, `YYYY-MM`. O estado tem `version`, `transactions`, `categories`, `budgets`, `installments`, `recurringExpenses`, `goals` e `cards`.
 
 | Método e rota | Função |
 | --- | --- |
@@ -75,6 +80,9 @@ Valores monetários são inteiros em **centavos**; datas são `YYYY-MM-DD`; mese
 | `POST /api/admin/users/:id/block` | Bloquear ou desbloquear acesso (somente administrador) |
 | `DELETE /api/admin/users/:id` | Excluir uma conta (somente administrador) |
 | `GET /api/state` | Ler dados |
+| `POST /api/cards` | Cadastrar cartão |
+| `PUT /api/cards/:id` | Alterar fechamento ou vencimento |
+| `DELETE /api/cards/:id` | Excluir cartão sem compras vinculadas |
 | `POST /api/transactions` | Criar lançamento |
 | `PUT /api/transactions/:id` | Editar lançamento |
 | `DELETE /api/transactions/:id` | Excluir (corpo JSON `{}`) |
@@ -107,6 +115,8 @@ Exemplo:
   "type": "expense",
   "category": "alimentacao",
   "date": "2026-09-11",
+  "purchaseDate": "2026-09-11",
+  "paymentMethod": "debit",
   "status": "paid",
   "notes": "Compras da semana"
 }

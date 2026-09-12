@@ -129,12 +129,28 @@ test('API exige autenticação e isola todo o CRUD por usuário', async () => {
     assert.equal(a.transactions.length, 0);
     assert.equal(b.transactions.length, 0);
     assert.equal(a.categories.length, 9);
+    a = (await api('/cards', 'token-a', 'POST', { name: 'Principal', closingDay: 10, dueDay: 20 })).data;
+    const cardId = a.cards[0].id;
+    assert.equal((await api('/state', 'token-b')).data.cards.length, 0);
+    a = (await api('/cards/' + cardId, 'token-a', 'PUT', { name: 'Principal', closingDay: 12, dueDay: 22 })).data;
+    assert.equal(a.cards[0].dueDay, 22);
+    assert.equal((await api('/cards', 'token-a', 'POST', { name: 'Principal', closingDay: 10, dueDay: 20 })).status, 400);
+    assert.equal((await api('/cards/' + cardId, 'token-b', 'DELETE', {})).status, 404);
     const transaction = {
       description: 'Teste usuário A', amount: 1250, type: 'expense',
       status: 'pending', date: '2026-09-11', category: 'alimentacao', notes: ''
     };
     a = (await api('/transactions', 'token-a', 'POST', transaction)).data;
     assert.equal(a.transactions[0].description, 'Teste usuário A');
+    const credit = { ...transaction, description: 'Compra no cartão', paymentMethod: 'credit', purchaseDate: '2026-09-11', date: '2026-10-22', cardId };
+    a = (await api('/transactions', 'token-a', 'POST', credit)).data;
+    assert.equal(a.transactions[1].cardId, cardId);
+    const creditId = a.transactions[1].id;
+    a = (await api('/transactions/' + creditId, 'token-a', 'PUT', { ...a.transactions[1], status: 'paid', date: '2026-10-18', dueDate: '2026-10-22' })).data;
+    assert.equal(a.transactions[1].dueDate, '2026-10-22');
+    assert.equal(a.transactions[1].date, '2026-10-18');
+    assert.equal((await api('/cards/' + cardId, 'token-a', 'DELETE', {})).status, 400);
+    a = (await api('/transactions/' + creditId, 'token-a', 'DELETE', {})).data;
     assert.equal((await api('/state', 'token-b')).data.transactions.length, 0);
 
     b = (await api('/transactions', 'token-b', 'POST', { ...transaction, description: 'Teste usuário B' })).data;

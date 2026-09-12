@@ -10,7 +10,7 @@ export const defaultCategories = [
   { id: 'educacao', name: 'Educação', color: '#779853' },
   { id: 'outros', name: 'Outros', color: '#80908c' }
 ];
-export const emptyState = () => ({ version: 1, transactions: [], budgets: [], installments: [], recurringExpenses: [], goals: [], categories: structuredClone(defaultCategories) });
+export const emptyState = () => ({ version: 1, transactions: [], budgets: [], installments: [], recurringExpenses: [], goals: [], cards: [], categories: structuredClone(defaultCategories) });
 export function requireValue(condition, message) {
   if (!condition) { const error = new Error(message); error.status = 400; throw error; }
 }
@@ -19,7 +19,7 @@ export function validDate(value) {
   const date = new Date(value + 'T12:00:00Z');
   return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
 }
-export function validateTransaction(value, categories) {
+export function validateTransaction(value, categories, cards = []) {
   requireValue(value && typeof value === 'object', 'Lançamento inválido.');
   requireValue(typeof value.description === 'string' && value.description.trim().length > 0 && value.description.trim().length <= 120, 'Informe uma descrição de até 120 caracteres.');
   requireValue(Number.isSafeInteger(value.amount) && value.amount > 0 && value.amount <= 100000000000, 'Informe um valor positivo de até R$ 1 bilhão.');
@@ -28,7 +28,25 @@ export function validateTransaction(value, categories) {
   requireValue(validDate(value.date), 'Data inválida.');
   requireValue(categories.some(c => c.id === value.category), 'Categoria não encontrada.');
   requireValue(typeof value.notes === 'string' && value.notes.length <= 500, 'Observação inválida.');
-  return { description: value.description.trim(), amount: value.amount, type: value.type, status: value.status, date: value.date, category: value.category, notes: value.notes.trim() };
+  const paymentMethod = value.paymentMethod || '';
+  const purchaseDate = value.purchaseDate || value.date;
+  const cardId = value.cardId || '';
+  const dueDate = value.dueDate || value.date;
+  requireValue(['', 'credit', 'debit', 'pix'].includes(paymentMethod), 'Meio de pagamento inválido.');
+  requireValue(validDate(purchaseDate), 'Data da compra inválida.');
+  requireValue(value.type === 'expense' || paymentMethod === '', 'Meio de pagamento só se aplica a despesas.');
+  requireValue(value.type === 'income' || purchaseDate <= value.date, 'A compra não pode ocorrer após o pagamento ou vencimento.');
+  requireValue(!['debit', 'pix'].includes(paymentMethod) || (value.status === 'paid' && purchaseDate === value.date), 'Débito e Pix devem ser efetivados na data da compra.');
+  requireValue(!cardId || (paymentMethod === 'credit' && cards.some(card => card.id === cardId)), 'Cartão não encontrado.');
+  requireValue(validDate(dueDate) && (value.status !== 'pending' || dueDate === value.date), 'Vencimento inválido.');
+  requireValue(value.status !== 'paid' || dueDate >= purchaseDate, 'O vencimento não pode ser anterior à compra.');
+  return { description: value.description.trim(), amount: value.amount, type: value.type, status: value.status, date: value.date, dueDate, purchaseDate, paymentMethod, cardId, category: value.category, notes: value.notes.trim() };
+}
+export function validateCard(value) {
+  requireValue(value && typeof value.name === 'string' && value.name.trim().length > 0 && value.name.trim().length <= 60, 'Informe um nome para o cartão (até 60 caracteres).');
+  requireValue(Number.isSafeInteger(value.closingDay) && value.closingDay >= 1 && value.closingDay <= 28, 'O fechamento deve ser entre os dias 1 e 28.');
+  requireValue(Number.isSafeInteger(value.dueDay) && value.dueDay >= 1 && value.dueDay <= 28, 'O vencimento deve ser entre os dias 1 e 28.');
+  return { name: value.name.trim(), closingDay: value.closingDay, dueDay: value.dueDay };
 }
 export function validateBudget(value, categories) {
   requireValue(value && /^\d{4}-(0[1-9]|1[0-2])$/.test(value.month), 'Mês inválido.');
@@ -80,7 +98,7 @@ export function validateBackup(value) {
   ids.clear();
   const transactions = value.transactions.map(t => {
     requireValue(t && typeof t.id === 'string' && /^[a-zA-Z0-9-]{1,80}$/.test(t.id) && !ids.has(t.id), 'Identificador de lançamento inválido ou duplicado.');
-    ids.add(t.id); return { id: t.id, ...validateTransaction(t, categories) };
+    ids.add(t.id); return t;
   });
   ids.clear();
   const budgets = value.budgets.map(b => { const result = validateBudget(b, categories); const key = b.month + b.category; requireValue(!ids.has(key), 'Orçamento duplicado.'); ids.add(key); return result; });
@@ -99,6 +117,13 @@ export function validateBackup(value) {
     requireValue(item && typeof item.id === 'string' && /^[a-zA-Z0-9-]{1,80}$/.test(item.id) && !ids.has(item.id), 'Identificador de meta inválido ou duplicado.');
     ids.add(item.id); return { id: item.id, ...validateGoal(item) };
   });
-  requireValue(installments.length <= 10000 && recurringExpenses.length <= 10000 && goals.length <= 1000, 'Backup excede os limites permitidos.');
-  return { version: 1, categories, transactions, budgets, installments, recurringExpenses, goals };
+  ids.clear();
+  const cards = (value.cards || []).map(item => {
+    requireValue(item && typeof item.id === 'string' && /^[a-zA-Z0-9-]{1,80}$/.test(item.id) && !ids.has(item.id), 'Identificador de cartão inválido ou duplicado.');
+    ids.add(item.id); return { id: item.id, ...validateCard(item) };
+  });
+  requireValue(new Set(cards.map(card => card.name.toLocaleLowerCase('pt-BR'))).size === cards.length, 'Nomes de cartões duplicados.');
+  const checkedTransactions = transactions.map(t => ({ id: t.id, ...validateTransaction(t, categories, cards) }));
+  requireValue(installments.length <= 10000 && recurringExpenses.length <= 10000 && goals.length <= 1000 && cards.length <= 100, 'Backup excede os limites permitidos.');
+  return { version: 1, categories, transactions: checkedTransactions, budgets, installments, recurringExpenses, goals, cards };
 }

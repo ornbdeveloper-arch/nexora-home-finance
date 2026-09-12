@@ -583,7 +583,7 @@ main {
   bottom:-25px;
   font-size:.6875rem;
   color:#7a877e;
-  text-transform:capitalize;
+  text-transform:none;
   white-space:nowrap;
 }
 
@@ -848,6 +848,30 @@ tbody tr:last-child td {
   flex-wrap:wrap;
   margin-bottom:22px;
 }
+.filters label { display:flex; align-items:center; gap:8px; font-size:.8rem; color:var(--muted); }
+.filters label select { color:var(--text); }
+.view-summary { margin-bottom:22px; padding:20px 24px; }
+.view-summary strong { display:block; font-size:1.08rem; color:var(--text); }
+.view-summary p { margin:8px 0 0; color:var(--muted); line-height:1.55; }
+.projection { display:flex; align-items:center; justify-content:space-between; gap:24px; margin-bottom:24px; padding:22px 26px; }
+.projection > div { display:flex; flex-direction:column; gap:5px; flex-shrink:0; }
+.projection small { font-size:.73rem; font-weight:700; letter-spacing:.07em; color:var(--muted); }
+.projection strong { font-size:1.7rem; color:var(--green); }
+.projection span,.projection p { font-size:.84rem; color:var(--muted); line-height:1.5; }
+.projection p { max-width:440px; margin:0; }
+.card-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr)); gap:18px; }
+.card-overview > strong { display:block; margin:20px 0 4px; font-size:1.8rem; color:var(--green); }
+.card-overview p { color:var(--muted); line-height:1.5; }
+.card-overview ul { list-style:none; padding:0; margin:18px 0 0; border-top:1px solid var(--border); }
+.card-overview li { display:flex; justify-content:space-between; gap:16px; padding:10px 0; border-bottom:1px solid var(--border); font-size:.85rem; }
+.calendar-list { padding:8px 22px; }
+.calendar-item { display:grid; grid-template-columns:100px minmax(0,1fr) auto; align-items:center; gap:18px; padding:14px 0; border-bottom:1px solid var(--border); }
+.calendar-item:last-child { border-bottom:0; }
+.calendar-item time { font-weight:700; color:var(--green); }
+.calendar-item div { display:flex; flex-direction:column; gap:4px; min-width:0; }
+.calendar-item div strong { overflow-wrap:anywhere; }
+.calendar-item small { color:var(--muted); }
+@media (max-width:700px) { .projection { flex-direction:column; align-items:flex-start; } .calendar-item { grid-template-columns:1fr auto; gap:6px 12px; } .calendar-item time { grid-column:1 / -1; } .filters label { width:100%; justify-content:space-between; } }
 
 .filters input {
   flex:1;

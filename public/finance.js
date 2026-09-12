@@ -9,6 +9,20 @@ export function toCents(value) {
   return amount;
 }
 export const sum = rows => rows.reduce((total, row) => total + row.amount, 0);
+export function cardDueDate(purchaseDate, card) {
+  const [year, month, day] = purchaseDate.split('-').map(Number);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day) || year < 1900 || year > 9999 || month < 1 || month > 12 || day < 1 || day > new Date(year, month, 0).getDate() || !Number.isInteger(card.closingDay) || card.closingDay < 1 || card.closingDay > 28 || !Number.isInteger(card.dueDay) || card.dueDay < 1 || card.dueDay > 28) throw new Error('Data da compra ou configuração do cartão inválida.');
+  const closingMonth = new Date(year, month - 1 + (day > card.closingDay ? 1 : 0), 1);
+  const dueMonth = new Date(closingMonth.getFullYear(), closingMonth.getMonth() + (card.dueDay <= card.closingDay ? 1 : 0), card.dueDay);
+  return `${dueMonth.getFullYear()}-${String(dueMonth.getMonth() + 1).padStart(2, '0')}-${String(dueMonth.getDate()).padStart(2, '0')}`;
+}
+export const reservedForGoals = goals => goals.reduce((total, goal) => total + goal.currentAmount, 0);
+export function projectedBalance(rows, asOf, endDate, extraCommitments = 0) {
+  const current = rows.filter(t => t.status === 'paid' && t.date <= asOf).reduce((total, t) => total + (t.type === 'income' ? t.amount : -t.amount), 0);
+  const futurePaid = rows.filter(t => t.status === 'paid' && t.date > asOf && t.date <= endDate).reduce((total, t) => total + (t.type === 'income' ? t.amount : -t.amount), 0);
+  const planned = rows.filter(t => t.status === 'pending' && t.date <= endDate).reduce((total, t) => total + (t.type === 'income' ? t.amount : -t.amount), 0);
+  return current + futurePaid + planned - extraCommitments;
+}
 export function totals(rows, month) {
   const monthly = rows.filter(t => t.date.startsWith(month));
   const income = sum(monthly.filter(t => t.type === 'income' && t.status === 'paid'));

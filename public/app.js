@@ -1,6 +1,6 @@
 import { request } from './api.js';
 import { login, logout, isAuthenticated } from './auth.js';
-import { money, toCents, sum, totals } from './finance.js';
+import { money, toCents, sum, totals, cardDueDate, projectedBalance, reservedForGoals } from './finance.js';
 
 // 1. Estado da interface. Os dados reais vêm sempre do servidor.
 const $ = selector => document.querySelector(selector);
@@ -15,10 +15,12 @@ let adminUsers = null;
 let demo = false;
 let month = today().slice(0, 7);
 let page = 'overview';
-let filter = { search: '', type: '', status: '', category: '', page: 1 };
+let filter = { search: '', type: '', status: '', category: '', paymentMethod: '', view: 'payment', page: 1 };
 const titles = {
   overview: ['Visão geral', 'Um olhar completo para o seu dinheiro.'],
   transactions: ['Lançamentos', 'Cada entrada e saída, no seu devido lugar.'],
+  cards: ['Cartões', 'Fechamento, vencimento e próximas faturas.'],
+  calendar: ['Agenda', 'Entradas e saídas previstas nos próximos 30 dias.'],
   budgets: ['Orçamentos', 'Planeje seus gastos e acompanhe seus limites.'],
   installments: ['Parcelamentos', 'Acompanhe compras e dívidas que comprometem os próximos meses.'],
   goals: ['Metas', 'Transforme planos em valores e prazos que você pode acompanhar.'],
@@ -53,6 +55,8 @@ const category = id => state.categories.find(c => c.id === id) || { name: 'Outro
 const monthName = value => new Date(value + '-15T12:00:00').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
 const dateLabel = value => value.split('-').reverse().join('/');
 const monthly = () => state.transactions.filter(t => t.date.startsWith(month));
+const viewedMonthly = () => state.transactions.filter(t => (filter.view === 'purchase' && t.type === 'expense' ? t.purchaseDate || t.date : t.date).startsWith(month));
+const cardName = id => state.cards.find(card => card.id === id)?.name || 'Cartão não cadastrado';
 const monthOffset = (value, offset) => { const date = new Date(value + '-15T12:00:00'); date.setMonth(date.getMonth() + offset); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`; };
 function installmentAt(item, targetMonth) {
   const index = (Number(targetMonth.slice(0, 4)) - Number(item.startMonth.slice(0, 4))) * 12 + Number(targetMonth.slice(5)) - Number(item.startMonth.slice(5));
@@ -73,11 +77,13 @@ function statCards() {
   const t = totals(state.transactions, month);
   const installments = installmentsInMonth(); const recurring = recurringInMonth();
   const committed = installments.filter(item => !item.paid).reduce((total, item) => total + item.monthlyAmount, 0) + recurring.filter(item => !item.paid).reduce((total, item) => total + item.amount, 0);
+  const pendingCount = monthly().filter(item => item.status === 'pending' && item.type === 'expense').length;
+  const commitmentCount = installments.filter(item => !item.paid).length + recurring.filter(item => !item.paid).length;
   const cards = [
     ['Saldo acumulado', t.balance, 'wallet', 'Efetivados até o fim deste mês', 'featured'],
     ['Receitas do mês', t.income, 'down', `${money(t.receivable)} a receber`, ''],
     ['Despesas do mês', t.expense, 'up', 'Pagamentos já efetivados', ''],
-    ['Contas a pagar', t.payable + committed, 'clock', `${monthly().filter(t => t.status === 'pending' && t.type === 'expense').length} contas + ${installments.filter(i => !i.paid).length + recurring.filter(i => !i.paid).length} compromissos`, '']
+    ['Contas a pagar', t.payable + committed, 'clock', `${pendingCount} ${pendingCount === 1 ? 'lançamento' : 'lançamentos'} + ${commitmentCount} ${commitmentCount === 1 ? 'compromisso' : 'compromissos'}`, '']
   ];
   return `<section class="cards" aria-label="Resumo financeiro">${cards.map(([label, value, image, note, css]) => `<article class="stat-card ${css}"><div class="stat-label">${label}<span class="stat-icon">${icon(image)}</span></div><div class="stat-value">${money(value)}</div><div class="stat-note">${note}</div></article>`).join('')}</section>`;
 }
@@ -103,27 +109,33 @@ function expenseChart() {
   return `<section class="panel"><div class="panel-heading"><div><h2>Para onde vai seu dinheiro</h2><p>Despesas efetivadas por categoria</p></div></div>${!total ? empty('Ainda sem despesas', 'Suas categorias aparecerão aqui.') : `<div class="expense-content"><div class="donut" style="background:conic-gradient(${gradient})"><div class="donut-center"><small>Total de despesas</small><strong>${money(total)}</strong></div></div><div class="category-legend">${groups.map(c => `<div><span><i class="color-dot" style="background:${c.color}"></i>${escape(c.name)}</span><strong>${Math.round(c.amount / total * 100)}%</strong></div>`).join('')}</div></div>`}</section>`;
 }
 function rowsHtml(rows, actions = false) {
-  return rows.map(t => `<tr><td><div class="transaction-description"><span class="transaction-symbol ${t.type}">${t.type === 'income' ? '↙' : '↗'}</span><span>${escape(t.description)}</span></div></td><td><span class="tag">${escape(category(t.category).name)}</span></td><td>${dateLabel(t.date)}</td><td><span class="status ${t.status}">${t.status === 'pending' ? 'Pendente' : t.type === 'income' ? 'Recebido' : 'Pago'}</span></td><td class="amount ${t.type === 'income' ? 'positive' : ''}">${t.type === 'income' ? '+' : '−'} ${money(t.amount)}</td>${actions ? `<td><div class="row-actions">${t.status === 'pending' ? `<button data-action="settle" data-id="${t.id}" aria-label="Efetivar ${escape(t.description)}" title="Marcar como efetivado">${icon('check')}</button>` : ''}<button data-action="edit" data-id="${t.id}" aria-label="Editar ${escape(t.description)}" title="Editar">${icon('edit')}</button><button data-action="delete" data-id="${t.id}" aria-label="Excluir ${escape(t.description)}" title="Excluir">${icon('trash')}</button></div></td>` : ''}</tr>`).join('');
+  return rows.map(t => `<tr><td><div class="transaction-description"><span class="transaction-symbol ${t.type}">${t.type === 'income' ? '↙' : '↗'}</span><span>${escape(t.description)}${t.type === 'expense' && t.paymentMethod ? `<small class="table-note">${{ credit: 'Crédito', debit: 'Débito', pix: 'Pix' }[t.paymentMethod]}${t.cardId ? ' · ' + escape(cardName(t.cardId)) : ''} · compra ${dateLabel(t.purchaseDate || t.date)}</small>` : ''}${t.status === 'paid' && t.dueDate && t.dueDate !== t.date ? `<small class="table-note">Vencia em ${dateLabel(t.dueDate)}</small>` : ''}</span></div></td><td><span class="tag">${escape(category(t.category).name)}</span></td><td>${dateLabel(t.date)}</td><td><span class="status ${t.status}">${t.status === 'pending' ? 'Pendente' : t.type === 'income' ? 'Recebido' : 'Pago'}</span></td><td class="amount ${t.type === 'income' ? 'positive' : ''}">${t.type === 'income' ? '+' : '−'} ${money(t.amount)}</td>${actions ? `<td><div class="row-actions">${t.status === 'pending' ? `<button data-action="settle" data-id="${t.id}" aria-label="Efetivar ${escape(t.description)}" title="Confirmar pagamento">${icon('check')}</button>` : ''}<button data-action="edit" data-id="${t.id}" aria-label="Editar ${escape(t.description)}" title="Editar">${icon('edit')}</button><button data-action="delete" data-id="${t.id}" aria-label="Excluir ${escape(t.description)}" title="Excluir">${icon('trash')}</button></div></td>` : ''}</tr>`).join('');
 }
-function table(rows, actions = false) { return `<div class="table-wrap"><table><thead><tr><th>DESCRIÇÃO</th><th>CATEGORIA</th><th>DATA</th><th>SITUAÇÃO</th><th>VALOR</th>${actions ? '<th>AÇÕES</th>' : ''}</tr></thead><tbody>${rowsHtml(rows, actions)}</tbody></table></div>`; }
+function table(rows, actions = false) { return `<div class="table-wrap"><table><thead><tr><th>DESCRIÇÃO</th><th>CATEGORIA</th><th>PAGAMENTO / VENCIMENTO</th><th>SITUAÇÃO</th><th>VALOR</th>${actions ? '<th>AÇÕES</th>' : ''}</tr></thead><tbody>${rowsHtml(rows, actions)}</tbody></table></div>`; }
 function upcoming() {
   const pending = monthly().filter(t => t.status === 'pending' && t.type === 'expense').sort((a,b) => a.date.localeCompare(b.date));
-  return `<section class="panel"><div class="panel-heading"><h2>Contas a pagar</h2><span class="pill">${pending.length} pendentes</span></div>${pending.length ? pending.slice(0,4).map(t => `<div class="upcoming-item"><div class="date-tile"><small>${new Date(t.date + 'T12:00:00').toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '')}</small><strong>${t.date.slice(8)}</strong></div><div class="upcoming-description"><strong>${escape(t.description)}</strong><small>${escape(category(t.category).name)}</small></div><div class="upcoming-amount">${money(t.amount)}<small>${t.date < today() ? 'Em atraso' : t.date === today() ? 'Vence hoje' : 'A vencer'}</small></div></div>`).join('') : empty('Tudo em dia', 'Nenhuma despesa pendente neste mês.')}</section>`;
+  return `<section class="panel"><div class="panel-heading"><h2>Contas a pagar</h2><span class="pill">${pending.length} ${pending.length === 1 ? 'pendente' : 'pendentes'}</span></div>${pending.length ? pending.slice(0,4).map(t => `<div class="upcoming-item"><div class="date-tile"><small>${new Date(t.date + 'T12:00:00').toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '')}</small><strong>${t.date.slice(8)}</strong></div><div class="upcoming-description"><strong>${escape(t.description)}</strong><small>${escape(category(t.category).name)}</small></div><div class="upcoming-amount">${money(t.amount)}<small>${t.date < today() ? 'Em atraso' : t.date === today() ? 'Vence hoje' : 'A vencer'}</small></div></div>`).join('') : empty('Tudo em dia', 'Nenhuma despesa pendente neste mês.')}</section>`;
 }
 function renderOverview() {
   const rows = ordered(monthly());
-  return `${state.transactions.length === 0 ? `<div class="panel empty overview-welcome"><div><h2>Seu próximo capítulo começa aqui.</h2><p>Registre seu primeiro lançamento ou explore um exemplo.</p></div><button class="secondary" data-action="demo">Explorar demonstração ↗</button></div>` : ''}${statCards()}<div class="dashboard-grid">${cashChart()}${expenseChart()}</div><div class="dashboard-grid"><section class="panel table-panel"><div class="panel-heading"><div><h2>Últimos lançamentos</h2><p>Suas movimentações neste mês</p></div><a class="text-button" href="#transactions">Ver todos ↗</a></div>${rows.length ? table(rows.slice(0, 5)) : empty('Tudo pronto para começar', 'Adicione uma receita ou despesa para acompanhar seu mês.', '<button class="primary" data-action="new">＋ Adicionar lançamento</button>')}<div class="table-footer"><span>${rows.length} lançamentos em ${monthName(month)}</span><a href="#settings" class="text-button">Dados e backup ↗</a></div></section>${upcoming()}</div>`;
+  const end = `${month}-${new Date(Number(month.slice(0, 4)), Number(month.slice(5)), 0).getDate()}`;
+  const cutoff = today() < end ? today() : end;
+  const commitments = installmentsInMonth().filter(i => !i.paid).reduce((total, item) => total + item.monthlyAmount, 0) + recurringInMonth().filter(i => !i.paid).reduce((total, item) => total + item.amount, 0);
+  const projection = projectedBalance(state.transactions, cutoff, end, commitments);
+  const available = projection - reservedForGoals(state.goals);
+  return `${state.transactions.length === 0 ? `<div class="panel empty overview-welcome"><div><h2>Seu próximo capítulo começa aqui.</h2><p>Registre seu primeiro lançamento ou explore um exemplo.</p></div><button class="secondary" data-action="demo">Explorar demonstração ↗</button></div>` : ''}${statCards()}<section class="panel projection"><div><small>PROJEÇÃO ATÉ ${dateLabel(end)}</small><strong>${money(projection)}</strong><span>Após reservas informadas para metas: ${money(available)}</span></div><p>Estimativa com lançamentos pendentes e compromissos cadastrados. Se uma parcela ou recorrência também foi lançada como despesa, ela será contada duas vezes.</p></section><div class="dashboard-grid">${cashChart()}${expenseChart()}</div><div class="dashboard-grid"><section class="panel table-panel"><div class="panel-heading"><div><h2>Últimos lançamentos</h2><p>Suas movimentações neste mês</p></div><a class="text-button" href="#transactions">Ver todos ↗</a></div>${rows.length ? table(rows.slice(0, 5)) : empty('Tudo pronto para começar', 'Adicione uma receita ou despesa para acompanhar seu mês.', '<button class="primary" data-action="new">＋ Adicionar lançamento</button>')}<div class="table-footer"><span>${rows.length} lançamentos em ${monthName(month)}</span><a href="#settings" class="text-button">Dados e backup ↗</a></div></section>${upcoming()}</div>`;
 }
 function filteredRows() {
   const text = filter.search.toLocaleLowerCase('pt-BR');
-  return ordered(monthly()).filter(t => (!filter.type || t.type === filter.type) && (!filter.status || t.status === filter.status) && (!filter.category || t.category === filter.category) && (t.description.toLocaleLowerCase('pt-BR').includes(text) || t.notes.toLocaleLowerCase('pt-BR').includes(text)));
+  return [...viewedMonthly()].sort((a,b) => (filter.view === 'purchase' ? (b.purchaseDate || b.date).localeCompare(a.purchaseDate || a.date) : b.date.localeCompare(a.date)) || a.description.localeCompare(b.description)).filter(t => (!filter.type || t.type === filter.type) && (!filter.status || t.status === filter.status) && (!filter.category || t.category === filter.category) && (!filter.paymentMethod || t.paymentMethod === filter.paymentMethod) && (t.description.toLocaleLowerCase('pt-BR').includes(text) || t.notes.toLocaleLowerCase('pt-BR').includes(text)));
 }
 function transactionsResult() {
   const rows = filteredRows(); const pages = Math.max(1, Math.ceil(rows.length / 12)); filter.page = Math.min(filter.page, pages);
-  return `${rows.length ? table(rows.slice((filter.page - 1) * 12, filter.page * 12), true) : empty('Nenhum lançamento encontrado', 'Altere os filtros ou adicione um novo lançamento.')}<div class="table-footer"><span>${rows.length} registros · Resultado: ${money(rows.reduce((a,t) => a + (t.type === 'income' ? t.amount : -t.amount), 0))}<br><small>Inclui pendentes nos filtros atuais</small></span><div class="pagination"><button class="secondary" data-action="previous" ${filter.page === 1 ? 'disabled' : ''} aria-label="Página anterior">‹</button><span>${filter.page} / ${pages}</span><button class="secondary" data-action="next" ${filter.page === pages ? 'disabled' : ''} aria-label="Próxima página">›</button></div></div>`;
+  return `${rows.length ? table(rows.slice((filter.page - 1) * 12, filter.page * 12), true) : empty('Nenhum lançamento encontrado', 'Altere os filtros ou adicione um novo lançamento.')}<div class="table-footer"><span>${rows.length} registros · ${filter.view === 'purchase' ? 'Valor das compras' : 'Resultado dos registros'}: ${money(filter.view === 'purchase' ? sum(rows.filter(t => t.type === 'expense')) : rows.reduce((a,t) => a + (t.type === 'income' ? t.amount : -t.amount), 0))}<br><small>${filter.view === 'purchase' ? 'Compras filtradas pela data em que ocorreram' : 'Inclui pendentes nos filtros atuais'}</small></span><div class="pagination"><button class="secondary" data-action="previous" ${filter.page === 1 ? 'disabled' : ''} aria-label="Página anterior">‹</button><span>${filter.page} / ${pages}</span><button class="secondary" data-action="next" ${filter.page === pages ? 'disabled' : ''} aria-label="Próxima página">›</button></div></div>`;
 }
 function renderTransactions() {
-  return `${statCards()}<div class="filters"><input id="search" aria-label="Buscar lançamentos" placeholder="Buscar descrição ou observação…" value="${escape(filter.search)}"><select id="filter-type" aria-label="Filtrar por tipo"><option value="">Todos os tipos</option><option value="income">Receitas</option><option value="expense">Despesas</option></select><select id="filter-status" aria-label="Filtrar por situação"><option value="">Todas as situações</option><option value="paid">Efetivados</option><option value="pending">Pendentes</option></select><select id="filter-category" aria-label="Filtrar por categoria">${options(true)}</select><button class="secondary" data-action="csv">${icon('download')} CSV</button></div><section id="transactions-result" class="panel table-panel">${transactionsResult()}</section>`;
+  const purchaseTotal = sum(viewedMonthly().filter(t => t.type === 'expense'));
+  return `${filter.view === 'payment' ? statCards() : `<section class="panel view-summary"><strong>Compras feitas em ${monthName(month)}: ${money(purchaseTotal)}</strong><p>Esta visão usa a data da compra. O saldo e as contas a pagar usam a data do pagamento.</p></section>`}<div class="filters"><label>Visualizar por<select id="filter-view"><option value="payment">Pagamento / vencimento</option><option value="purchase">Data da compra</option></select></label><input id="search" aria-label="Buscar lançamentos" placeholder="Buscar descrição ou observação…" value="${escape(filter.search)}"><select id="filter-type" aria-label="Filtrar por tipo"><option value="">Todos os tipos</option><option value="income">Receitas</option><option value="expense">Despesas</option></select><select id="filter-status" aria-label="Filtrar por situação"><option value="">Todas as situações</option><option value="paid">Efetivados</option><option value="pending">Pendentes</option></select><select id="filter-category" aria-label="Filtrar por categoria">${options(true)}</select><select id="filter-paymentMethod" aria-label="Filtrar por meio de pagamento"><option value="">Todos os meios</option><option value="credit">Crédito</option><option value="debit">Débito</option><option value="pix">Pix</option></select><button class="secondary" data-action="csv">${icon('download')} CSV</button></div><section id="transactions-result" class="panel table-panel">${transactionsResult()}</section>`;
 }
 function renderBudgets() {
   const budgets = state.budgets.filter(b => b.month === month);
@@ -141,7 +153,22 @@ function renderInstallments() {
   return `<section class="commitment-hero"><div><p class="eyebrow">COMPROMISSOS PENDENTES EM ${monthName(month).toUpperCase()}</p><strong>${money(monthlyTotal)}</strong><span>${active.filter(i => !i.paid).length + recurring.filter(i => !i.paid).length} pagamentos previstos neste mês</span></div><div class="hero-actions"><button class="secondary" data-action="recurring">＋ Conta recorrente</button><button class="primary" data-action="installment">＋ Compra parcelada</button></div></section>${!state.installments.length && !state.recurringExpenses.length ? `<section class="panel">${empty('Nenhum compromisso cadastrado', 'Adicione compras parceladas ou contas que se repetem todo mês.')}</section>` : `<div class="commitment-section"><div class="panel-heading"><div><h2>Compras parceladas</h2><p>${state.installments.length} cadastradas</p></div></div><div class="installment-grid">${installmentCards || '<div class="panel empty">Nenhuma compra parcelada.</div>'}</div></div><div class="commitment-section"><div class="panel-heading"><div><h2>Despesas recorrentes</h2><p>Aluguel, assinaturas e contas mensais</p></div></div><div class="installment-grid">${recurringCards || '<div class="panel empty">Nenhuma despesa recorrente.</div>'}</div></div>`}`;
 }
 function renderGoals() {
-  return `<div class="panel-heading"><div><h2>${state.goals.length} meta${state.goals.length === 1 ? '' : 's'} em andamento</h2><p>Acompanhe o valor guardado e o prazo de cada objetivo.</p></div><button class="primary" data-action="goal">＋ Nova meta</button></div>${!state.goals.length ? `<section class="panel">${empty('Crie sua primeira meta', 'Defina um objetivo, o valor necessário e quando pretende alcançá-lo.', '<button class="primary" data-action="goal">Criar meta</button>')}</section>` : `<div class="goal-grid">${state.goals.map(goal => { const percent = Math.min(100, Math.round(goal.currentAmount / goal.targetAmount * 100)); const remaining = Math.max(0, goal.targetAmount - goal.currentAmount); return `<article class="panel goal-card"><div class="panel-heading"><div><span class="goal-percent">${percent}%</span><h2>${escape(goal.name)}</h2></div><div class="row-actions"><button data-action="edit-goal" data-id="${goal.id}" aria-label="Editar ${escape(goal.name)}">${icon('edit')}</button><button data-action="delete-goal" data-id="${goal.id}" aria-label="Excluir ${escape(goal.name)}">${icon('trash')}</button></div></div><progress max="${goal.targetAmount}" value="${Math.min(goal.currentAmount, goal.targetAmount)}"></progress><div class="goal-values"><strong>${money(goal.currentAmount)}</strong><span>de ${money(goal.targetAmount)}</span></div><p>Faltam <strong>${money(remaining)}</strong> · prazo ${dateLabel(goal.targetDate)}</p></article>`; }).join('')}</div>`}`;
+  const reserved = reservedForGoals(state.goals); const cash = totals(state.transactions, month).balance;
+  return `<section class="panel view-summary"><strong>${money(reserved)} informados como reservados para metas</strong><p>Disponível estimado após reservas: ${money(cash - reserved)}. Os valores guardados são informativos; registre a transferência como lançamento se quiser refletir a saída no caixa. Evite contar a mesma reserva duas vezes.</p></section><div class="panel-heading"><div><h2>${state.goals.length} meta${state.goals.length === 1 ? '' : 's'} em andamento</h2><p>Acompanhe o valor guardado e o prazo de cada objetivo.</p></div><button class="primary" data-action="goal">＋ Nova meta</button></div>${!state.goals.length ? `<section class="panel">${empty('Crie sua primeira meta', 'Defina um objetivo, o valor necessário e quando pretende alcançá-lo.', '<button class="primary" data-action="goal">Criar meta</button>')}</section>` : `<div class="goal-grid">${state.goals.map(goal => { const percent = Math.min(100, Math.round(goal.currentAmount / goal.targetAmount * 100)); const remaining = Math.max(0, goal.targetAmount - goal.currentAmount); return `<article class="panel goal-card"><div class="panel-heading"><div><span class="goal-percent">${percent}%</span><h2>${escape(goal.name)}</h2></div><div class="row-actions"><button data-action="edit-goal" data-id="${goal.id}" aria-label="Editar ${escape(goal.name)}">${icon('edit')}</button><button data-action="delete-goal" data-id="${goal.id}" aria-label="Excluir ${escape(goal.name)}">${icon('trash')}</button></div></div><progress max="${goal.targetAmount}" value="${Math.min(goal.currentAmount, goal.targetAmount)}" aria-label="Progresso da meta ${escape(goal.name)}"></progress><div class="goal-values"><strong>${money(goal.currentAmount)}</strong><span>de ${money(goal.targetAmount)}</span></div><p>Faltam <strong>${money(remaining)}</strong> · prazo ${dateLabel(goal.targetDate)}</p></article>`; }).join('')}</div>`}`;
+}
+function renderCards() {
+  return `<div class="panel-heading"><div><h2>Seus cartões</h2><p>Configure fechamento e vencimento para sugerir a fatura de cada compra. Os totais abaixo incluem compras simples vinculadas ao cartão; parcelamentos permanecem na área própria.</p></div><button class="primary" data-action="new-card">＋ Novo cartão</button></div>${!state.cards.length ? `<section class="panel">${empty('Nenhum cartão cadastrado', 'Cadastre um cartão para organizar as próximas faturas.', '<button class="primary" data-action="new-card">Cadastrar cartão</button>')}</section>` : `<div class="card-grid">${state.cards.map(card => { const purchases = state.transactions.filter(t => t.cardId === card.id && t.paymentMethod === 'credit' && t.status === 'pending'); const nextDate = purchases.map(t => t.date).sort()[0]; const invoice = nextDate ? purchases.filter(t => t.date.slice(0, 7) === nextDate.slice(0, 7)) : []; return `<article class="panel card-overview"><div class="panel-heading"><div><h2>${escape(card.name)}</h2><p>Fecha dia ${card.closingDay} · vence dia ${card.dueDay}</p></div><div class="row-actions"><button data-action="edit-card" data-id="${card.id}" aria-label="Editar ${escape(card.name)}" title="Editar cartão">${icon('edit')}</button><button data-action="delete-card" data-id="${card.id}" aria-label="Excluir ${escape(card.name)}" title="Excluir cartão">${icon('trash')}</button></div></div><strong>${money(sum(invoice))}</strong><p>${nextDate ? `${nextDate < today() ? 'Fatura em atraso' : 'Próxima fatura pendente'}: ${monthName(nextDate.slice(0, 7))} · ${invoice.length} compra${invoice.length === 1 ? '' : 's'}` : 'Nenhuma compra pendente neste cartão.'}</p>${invoice.length ? `<ul>${invoice.map(t => `<li><span>${escape(t.description)}</span><strong>${money(t.amount)}</strong></li>`).join('')}</ul>` : ''}</article>`; }).join('')}</div>`}`;
+}
+function agendaItems() {
+  const start = today(); const end = new Date(start + 'T12:00:00'); end.setDate(end.getDate() + 30);
+  const until = `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, '0')}-${String(end.getDate()).padStart(2, '0')}`;
+  const items = state.transactions.filter(t => t.status === 'pending' && t.date <= until).map(t => ({ date: t.date, description: t.description, amount: t.amount, type: t.type, source: 'Lançamento' }));
+  for (const offset of [0, 1]) { const key = monthOffset(start.slice(0, 7), offset); for (const item of installmentsInMonth(key).filter(i => !i.paid)) items.push({ date: `${key}-${String(item.dueDay).padStart(2, '0')}`, description: item.description, amount: item.monthlyAmount, type: 'expense', source: 'Parcela' }); for (const item of recurringInMonth(key).filter(i => !i.paid)) items.push({ date: `${key}-${String(item.dueDay).padStart(2, '0')}`, description: item.description, amount: item.amount, type: 'expense', source: 'Recorrente' }); }
+  return items.filter(item => item.date <= until).sort((a,b) => a.date.localeCompare(b.date));
+}
+function renderCalendar() {
+  const items = agendaItems();
+  return `<section class="panel view-summary"><strong>Próximos 30 dias</strong><p>Inclui lançamentos pendentes, parcelas e contas recorrentes. Vencidos ainda pendentes aparecem no início.</p></section><section class="panel calendar-list">${items.length ? items.map(item => `<div class="calendar-item"><time datetime="${item.date}">${dateLabel(item.date)}</time><div><strong>${escape(item.description)}</strong><small>${item.source}${item.date < today() ? ' · Vencido' : ''}</small></div><strong class="${item.type === 'income' ? 'positive' : ''}">${item.type === 'income' ? '+' : '−'} ${money(item.amount)}</strong></div>`).join('') : empty('Agenda livre', 'Nenhum vencimento pendente nos próximos 30 dias.')}</section>`;
 }
 function renderAdmin() {
   if (!currentUser?.isAdmin) return `<section class="panel">${empty('Acesso restrito', 'Somente o administrador pode gerenciar usuários.')}</section>`;
@@ -160,11 +187,12 @@ function render() {
   $('#page-title').textContent = titles[page][0]; $('#breadcrumb').textContent = titles[page][0]; $('#page-description').textContent = titles[page][1];
   document.title = `${titles[page][0]} · Nexora`;
   $('#month-label').textContent = monthName(month);
+  $('#month-trigger').closest('.month-picker-wrap').hidden = page === 'cards' || page === 'calendar';
   document.querySelectorAll('[data-page]').forEach(a => { a.classList.toggle('active', a.dataset.page === page); if (a.dataset.page === page) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
   $('#demo-banner').hidden = !demo;
   if (!state) return;
-  $('#page-content').innerHTML = ({ overview: renderOverview, transactions: renderTransactions, budgets: renderBudgets, installments: renderInstallments, goals: renderGoals, categories: renderCategories, admin: renderAdmin, settings: renderSettings })[page]();
-  if (page === 'transactions') for (const key of ['type', 'status', 'category']) $(`#filter-${key}`).value = filter[key];
+  $('#page-content').innerHTML = ({ overview: renderOverview, transactions: renderTransactions, cards: renderCards, calendar: renderCalendar, budgets: renderBudgets, installments: renderInstallments, goals: renderGoals, categories: renderCategories, admin: renderAdmin, settings: renderSettings })[page]();
+  if (page === 'transactions') for (const key of ['type', 'status', 'category', 'paymentMethod', 'view']) $(`#filter-${key}`).value = filter[key];
 }
 
 // 3. Alterações: aguarde o servidor salvar antes de atualizar a interface.
@@ -173,13 +201,55 @@ function openTransaction(id) {
   if (!ensureReal() || !state) return;
   const form = $('#transaction-form'); form.reset(); form.querySelector('.form-error').textContent = '';
   form.elements.category.innerHTML = options();
+  form.elements.cardId.innerHTML = '<option value="">Sem cartão cadastrado</option>' + state.cards.map(card => `<option value="${card.id}">${escape(card.name)}</option>`).join('');
   form.elements.date.value = month === today().slice(0,7) ? today() : month + '-01';
+  form.elements.purchaseDate.value = form.elements.date.value;
   form.elements.category.value = 'outros';
   const item = state.transactions.find(t => t.id === id);
   $('#transaction-title').textContent = item ? 'Editar lançamento' : 'Novo lançamento';
   if (item) for (const key of ['id', 'description', 'type', 'status', 'date', 'category', 'notes']) form.elements[key].value = item[key];
+  if (item) { form.elements.purchaseDate.value = item.purchaseDate || item.date; form.elements.paymentMethod.value = item.paymentMethod || ''; form.elements.cardId.value = item.cardId || ''; }
   if (item) form.elements.amount.value = (item.amount / 100).toFixed(2).replace('.', ',');
+  syncPurchaseFields(form);
   $('#transaction-dialog').showModal(); form.elements.description.focus();
+}
+function syncPurchaseFields(form) {
+  const expense = form.elements.type.value === 'expense';
+  $('#purchase-fields').hidden = !expense;
+  $('#purchase-help').hidden = !expense;
+  form.elements.paymentMethod.disabled = !expense;
+  form.elements.purchaseDate.disabled = !expense;
+  const credit = expense && form.elements.paymentMethod.value === 'credit';
+  $('#card-field').hidden = !credit;
+  form.elements.cardId.disabled = !credit;
+  if (!credit) form.elements.cardId.value = '';
+  const immediate = expense && ['debit', 'pix'].includes(form.elements.paymentMethod.value);
+  if (immediate) { form.elements.status.value = 'paid'; form.elements.date.value = form.elements.purchaseDate.value || form.elements.date.value; }
+  form.elements.status.disabled = immediate;
+  form.elements.date.disabled = immediate;
+  form.elements.purchaseDate.required = expense && !!form.elements.paymentMethod.value;
+}
+function openCard(id) {
+  if (!ensureReal()) return;
+  const form = $('#card-form'); form.reset(); form.querySelector('.form-error').textContent = '';
+  const card = state.cards.find(item => item.id === id);
+  $('#card-title').textContent = card ? 'Editar cartão' : 'Novo cartão';
+  form.elements.id.value = card?.id || '';
+  form.elements.name.value = card?.name || '';
+  form.elements.closingDay.value = card?.closingDay || 10;
+  form.elements.dueDay.value = card?.dueDay || 20;
+  $('#card-dialog').showModal(); form.elements.name.focus();
+}
+function openSettle(id) {
+  if (!ensureReal()) return;
+  const item = state.transactions.find(t => t.id === id);
+  if (!item || item.status !== 'pending') return;
+  const form = $('#settle-form'); form.reset(); form.querySelector('.form-error').textContent = '';
+  form.elements.id.value = id; form.elements.paidDate.value = today();
+  $('#settle-title').textContent = item.type === 'income' ? 'Confirmar recebimento' : 'Confirmar pagamento';
+  $('#settle-date-label').textContent = item.type === 'income' ? 'Data em que o dinheiro entrou' : 'Data em que o dinheiro saiu';
+  $('#settle-description').textContent = `${item.description} · ${money(item.amount)} · vencimento ${dateLabel(item.date)}`;
+  $('#settle-dialog').showModal(); form.elements.paidDate.focus();
 }
 function openBudget(id) {
   if (!ensureReal()) return;
@@ -257,7 +327,7 @@ function exportCsv() {
   if (!rows.length) return toast('Não há lançamentos para exportar neste período.');
   // Aspas protegem separadores; apóstrofo impede fórmulas executáveis em planilhas.
   const cell = value => '"' + String(value).replace(/^(\s*[=+@-]|[\t\r\n])/, c => "'" + c).replace(/"/g, '""') + '"';
-  const data = [['Descrição', 'Tipo', 'Categoria', 'Data', 'Situação', 'Valor (R$)', 'Observação'], ...rows.map(t => [t.description, t.type === 'income' ? 'Receita' : 'Despesa', category(t.category).name, dateLabel(t.date), t.status === 'paid' ? 'Efetivado' : 'Pendente', (t.amount / 100).toFixed(2).replace('.', ','), t.notes])];
+  const data = [['Descrição', 'Tipo', 'Categoria', 'Data da compra', 'Meio de pagamento', 'Cartão', 'Pagamento efetivo / previsto', 'Vencimento original', 'Situação', 'Valor (R$)', 'Observação'], ...rows.map(t => [t.description, t.type === 'income' ? 'Receita' : 'Despesa', category(t.category).name, t.type === 'expense' ? dateLabel(t.purchaseDate || t.date) : '', { credit: 'Crédito', debit: 'Débito', pix: 'Pix' }[t.paymentMethod] || '', t.cardId ? cardName(t.cardId) : '', dateLabel(t.date), dateLabel(t.dueDate || t.date), t.status === 'paid' ? 'Efetivado' : 'Pendente', (t.amount / 100).toFixed(2).replace('.', ','), t.notes])];
   download('\uFEFF' + data.map(row => row.map(cell).join(';')).join('\r\n'), `nexora-${demo ? 'demo-' : ''}${month}.csv`, 'text/csv;charset=utf-8'); toast('CSV exportado.');
 }
 function startDemo() {
@@ -285,14 +355,43 @@ $('#month-trigger').addEventListener('click', () => { const picker = $('#month')
 $('#month').addEventListener('change', event => { if (!event.target.value || !event.target.validity.valid) { event.target.value = month; return; } month = event.target.value; filter.page = 1; render(); });
 window.addEventListener('hashchange', render);
 $('#new-transaction').addEventListener('click', () => openTransaction());
+$('#transaction-form').addEventListener('change', event => {
+  const form = event.currentTarget;
+  if (['paymentMethod', 'purchaseDate', 'cardId'].includes(event.target.name) && form.elements.paymentMethod.value === 'credit' && (!form.elements.id.value || event.target.name !== 'paymentMethod')) {
+    form.elements.status.value = 'pending';
+    const purchase = form.elements.purchaseDate.value || form.elements.date.value;
+    const card = state.cards.find(item => item.id === form.elements.cardId.value);
+    if (purchase && card) form.elements.date.value = cardDueDate(purchase, card);
+    else if (purchase && event.target.name === 'paymentMethod') { const next = new Date(Number(purchase.slice(0, 4)), Number(purchase.slice(5, 7)), 1); next.setDate(Math.min(Number(purchase.slice(8)), new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate())); form.elements.date.value = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-${String(next.getDate()).padStart(2, '0')}`; }
+  }
+  if (event.target.name === 'paymentMethod' || event.target.name === 'type' || event.target.name === 'purchaseDate') syncPurchaseFields(form);
+});
 $('#exit-demo').addEventListener('click', async () => { demo = false; state = realState; realState = null; render(); try { state = await request(); render(); } catch (error) { toast(error.message); } });
 document.querySelectorAll('.close-dialog').forEach(button => button.addEventListener('click', () => button.closest('dialog').close()));
 $('#transaction-form').addEventListener('submit', async event => {
   event.preventDefault(); if (!ensureReal()) return; const form = event.currentTarget; const submit = form.querySelector('[type="submit"]'); submit.disabled = true;
   try {
     const fields = Object.fromEntries(new FormData(form)); const id = fields.id; delete fields.id; fields.amount = toCents(fields.amount);
+    if (fields.type === 'income') { fields.paymentMethod = ''; fields.purchaseDate = fields.date; }
+    if (!fields.purchaseDate) fields.purchaseDate = fields.date;
+    if (['debit', 'pix'].includes(fields.paymentMethod)) { fields.status = 'paid'; fields.date = fields.purchaseDate; }
+    if (!fields.cardId) fields.cardId = '';
+    const existing = state.transactions.find(item => item.id === id);
+    fields.dueDate = fields.status === 'pending' ? fields.date : existing?.dueDate && existing.dueDate !== existing.date ? existing.dueDate : fields.date;
     await mutate(id ? `/transactions/${id}` : '/transactions', id ? 'PUT' : 'POST', fields, id ? 'Lançamento atualizado.' : 'Lançamento salvo.'); $('#transaction-dialog').close();
   } catch (error) { form.querySelector('.form-error').textContent = error.message; } finally { submit.disabled = false; }
+});
+$('#card-form').addEventListener('submit', async event => {
+  event.preventDefault(); if (!ensureReal()) return;
+  const form = event.currentTarget; const button = form.querySelector('[type="submit"]'); button.disabled = true;
+  try { const id = form.elements.id.value; await mutate(id ? `/cards/${id}` : '/cards', id ? 'PUT' : 'POST', { name: form.elements.name.value, closingDay: Number(form.elements.closingDay.value), dueDay: Number(form.elements.dueDay.value) }, id ? 'Cartão atualizado.' : 'Cartão cadastrado.'); $('#card-dialog').close(); }
+  catch (error) { form.querySelector('.form-error').textContent = error.message; } finally { button.disabled = false; }
+});
+$('#settle-form').addEventListener('submit', async event => {
+  event.preventDefault(); if (!ensureReal()) return;
+  const form = event.currentTarget; const button = form.querySelector('[type="submit"]'); button.disabled = true;
+  try { const item = state.transactions.find(t => t.id === form.elements.id.value); const paidDate = form.elements.paidDate.value; if (item.type === 'expense' && paidDate < (item.purchaseDate || item.date)) throw new Error('O pagamento não pode ser anterior à compra.'); await mutate(`/transactions/${item.id}`, 'PUT', { ...item, status: 'paid', date: paidDate, dueDate: item.dueDate || item.date }, item.type === 'income' ? 'Recebimento registrado.' : 'Pagamento registrado.'); $('#settle-dialog').close(); }
+  catch (error) { form.querySelector('.form-error').textContent = error.message; } finally { button.disabled = false; }
 });
 $('#budget-form').addEventListener('submit', async event => {
   event.preventDefault(); if (!ensureReal()) return; const form = event.currentTarget; const button = form.querySelector('.primary'); button.disabled = true;
@@ -327,7 +426,7 @@ $('#page-content').addEventListener('input', event => {
 });
 $('#page-content').addEventListener('change', async event => {
   const key = event.target.id.replace('filter-', '');
-  if (['type', 'status', 'category'].includes(key)) { filter[key] = event.target.value; filter.page = 1; $('#transactions-result').innerHTML = transactionsResult(); }
+  if (['type', 'status', 'category', 'paymentMethod', 'view'].includes(key)) { filter[key] = event.target.value; filter.page = 1; if (key === 'view') render(); else $('#transactions-result').innerHTML = transactionsResult(); }
   if (event.target.id === 'backup-file' && event.target.files[0] && ensureReal()) {
     const file = event.target.files[0];
     try {
@@ -347,6 +446,8 @@ $('#page-content').addEventListener('submit', async event => {
 $('#page-content').addEventListener('click', async event => {
   const button = event.target.closest('[data-action]'); if (!button) return; const { action, id } = button.dataset;
   if (action === 'new' || action === 'edit') return openTransaction(id);
+  if (action === 'new-card' || action === 'edit-card') return openCard(id);
+  if (action === 'settle') return openSettle(id);
   if (action === 'budget') return openBudget(id);
   if (action === 'installment') return openInstallment();
   if (action === 'edit-installment') return openInstallment(id);
@@ -362,7 +463,7 @@ $('#page-content').addEventListener('click', async event => {
   button.disabled = true;
   try {
     if (action === 'delete') { const item = state.transactions.find(t => t.id === id); if (await confirmAction(`Excluir “${item.description}”, no valor de ${money(item.amount)}?`, 'Excluir lançamento')) await mutate(`/transactions/${id}`, 'DELETE', {}, 'Lançamento excluído.'); }
-    if (action === 'settle') { const item = state.transactions.find(t => t.id === id); await mutate(`/transactions/${id}`, 'PUT', { ...item, status: 'paid' }, 'Lançamento efetivado.'); }
+    if (action === 'delete-card') { const card = state.cards.find(item => item.id === id); if (await confirmAction(`Excluir o cartão “${card.name}”? Compras vinculadas precisam ser editadas antes.`, 'Excluir cartão')) await mutate(`/cards/${id}`, 'DELETE', {}, 'Cartão excluído.'); }
     if (action === 'delete-budget' && await confirmAction('Remover este limite mensal? Seus lançamentos serão mantidos.', 'Remover limite')) await mutate('/budgets', 'DELETE', { month, category: id }, 'Limite removido.');
     if (action === 'delete-installment') { const item = state.installments.find(entry => entry.id === id); if (await confirmAction(`Excluir o parcelamento de “${item.description}”?`, 'Excluir parcelamento')) await mutate(`/installments/${id}`, 'DELETE', {}, 'Parcelamento excluído.'); }
     if (action === 'toggle-installment-paid') { const item = state.installments.find(entry => entry.id === id); const number = installmentNumberAt(item, month); const paidInstallments = item.paidInstallments.includes(number) ? item.paidInstallments.filter(value => value !== number) : [...item.paidInstallments, number]; await mutate(`/installments/${id}`, 'PUT', { ...item, paidInstallments }, item.paidInstallments.includes(number) ? 'Parcela voltou para pendente.' : 'Parcela marcada como paga.'); }

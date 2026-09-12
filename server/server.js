@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { createRepository } from './repository.js';
-import { requireValue, validateTransaction, validateBudget, validateInstallment, validateRecurringExpense, validateGoal, validateBackup } from './domain.js';
+import { requireValue, validateTransaction, validateCard, validateBudget, validateInstallment, validateRecurringExpense, validateGoal, validateBackup } from './domain.js';
 
 const publicDirectory = fileURLToPath(new URL('../public/', import.meta.url));
 const port = Number(process.env.PORT || 3000);
@@ -154,15 +154,31 @@ const server = createServer(async (request, response) => {
     const categoryId = url.pathname.match(/^\/api\/categories\/([a-zA-Z0-9-]+)$/)?.[1];
     const recurringId = url.pathname.match(/^\/api\/recurring-expenses\/([a-zA-Z0-9-]+)$/)?.[1];
     const goalId = url.pathname.match(/^\/api\/goals\/([a-zA-Z0-9-]+)$/)?.[1];
+    const cardId = url.pathname.match(/^\/api\/cards\/([a-zA-Z0-9-]+)$/)?.[1];
     const newId = randomUUID();
     const saved = await repository.updateState(user.id, state => {
       if (url.pathname === '/api/transactions' && request.method === 'POST') {
-        state.transactions.push({ id: newId, ...validateTransaction(value, state.categories) });
+        state.transactions.push({ id: newId, ...validateTransaction(value, state.categories, state.cards) });
       } else if (id && ['PUT', 'DELETE'].includes(request.method)) {
         const index = state.transactions.findIndex(t => t.id === id);
         if (index === -1) throw fail(404, 'Lançamento não encontrado.');
         if (request.method === 'DELETE') state.transactions.splice(index, 1);
-        else state.transactions[index] = { id, ...validateTransaction(value, state.categories) };
+        else state.transactions[index] = { id, ...validateTransaction(value, state.categories, state.cards) };
+      } else if (url.pathname === '/api/cards' && request.method === 'POST') {
+        const card = validateCard(value);
+        requireValue(!state.cards.some(item => item.name.toLocaleLowerCase('pt-BR') === card.name.toLocaleLowerCase('pt-BR')), 'Já existe um cartão com esse nome.');
+        state.cards.push({ id: newId, ...card });
+      } else if (cardId && ['PUT', 'DELETE'].includes(request.method)) {
+        const index = state.cards.findIndex(item => item.id === cardId);
+        if (index === -1) throw fail(404, 'Cartão não encontrado.');
+        if (request.method === 'DELETE') {
+          requireValue(!state.transactions.some(item => item.cardId === cardId), 'Há compras vinculadas a este cartão. Edite-as antes de excluir o cartão.');
+          state.cards.splice(index, 1);
+        } else {
+          const card = validateCard(value);
+          requireValue(!state.cards.some(item => item.id !== cardId && item.name.toLocaleLowerCase('pt-BR') === card.name.toLocaleLowerCase('pt-BR')), 'Já existe um cartão com esse nome.');
+          state.cards[index] = { id: cardId, ...card };
+        }
       } else if (url.pathname === '/api/budgets' && request.method === 'PUT') {
         const budget = validateBudget(value, state.categories);
         state.budgets = state.budgets.filter(b => b.month !== budget.month || b.category !== budget.category);

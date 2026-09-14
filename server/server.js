@@ -64,7 +64,7 @@ const assets = {
   '/': ['index.html', 'text/html'], '/index.html': ['index.html', 'text/html'],
   '/styles.css': ['styles.css', 'text/css'], '/app.js': ['app.js', 'text/javascript'],
   '/api.js': ['api.js', 'text/javascript'], '/auth.js': ['auth.js', 'text/javascript'],
-  '/finance.js': ['finance.js', 'text/javascript'], '/favicon.svg': ['favicon.svg', 'image/svg+xml']
+  '/finance.js': ['finance.js', 'text/javascript'], '/report.js': ['report.js', 'text/javascript'], '/favicon.svg': ['favicon.svg', 'image/svg+xml']
 };
 function json(response, status, value) {
   response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });

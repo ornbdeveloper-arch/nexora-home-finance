@@ -1,6 +1,7 @@
 import { request } from './api.js';
 import { login, logout, isAuthenticated } from './auth.js';
 import { money, toCents, sum, totals, cardDueDate, projectedBalance, reservedForGoals } from './finance.js';
+import { reportRecords, filterReport, reportTotals, reportTrend } from './report.js';
 
 // 1. Estado da interface. Os dados reais vêm sempre do servidor.
 const $ = selector => document.querySelector(selector);
@@ -16,8 +17,10 @@ let demo = false;
 let month = today().slice(0, 7);
 let page = 'overview';
 let filter = { search: '', type: '', status: '', category: '', paymentMethod: '', view: 'payment', page: 1 };
+let reportFilter = { search: '', kind: '', from: '', to: '', page: 1 };
 const titles = {
   overview: ['Visão geral', 'Um olhar completo para o seu dinheiro.'],
+  complete: ['Painel completo', 'Todos os registros financeiros em um só lugar.'],
   transactions: ['Lançamentos', 'Cada entrada e saída, no seu devido lugar.'],
   cards: ['Cartões', 'Fechamento, vencimento e próximas faturas.'],
   calendar: ['Agenda', 'Entradas e saídas previstas nos próximos 30 dias.'],
@@ -125,6 +128,20 @@ function renderOverview() {
   const available = projection - reservedForGoals(state.goals);
   return `${state.transactions.length === 0 ? `<div class="panel empty overview-welcome"><div><h2>Seu próximo capítulo começa aqui.</h2><p>Registre seu primeiro lançamento ou explore um exemplo.</p></div><button class="secondary" data-action="demo">Explorar demonstração ↗</button></div>` : ''}${statCards()}<section class="panel projection"><div><small>PROJEÇÃO ATÉ ${dateLabel(end)}</small><strong>${money(projection)}</strong><span>Após reservas informadas para metas: ${money(available)}</span></div><p>Estimativa com lançamentos pendentes e compromissos cadastrados. Se uma parcela ou recorrência também foi lançada como despesa, ela será contada duas vezes.</p></section><div class="dashboard-grid">${cashChart()}${expenseChart()}</div><div class="dashboard-grid"><section class="panel table-panel"><div class="panel-heading"><div><h2>Últimos lançamentos</h2><p>Suas movimentações neste mês</p></div><a class="text-button" href="#transactions">Ver todos ↗</a></div>${rows.length ? table(rows.slice(0, 5)) : empty('Tudo pronto para começar', 'Adicione uma receita ou despesa para acompanhar seu mês.', '<button class="primary" data-action="new">＋ Adicionar lançamento</button>')}<div class="table-footer"><span>${rows.length} lançamentos em ${monthName(month)}</span><a href="#settings" class="text-button">Dados e backup ↗</a></div></section>${upcoming()}</div>`;
 }
+const reportKinds = { transaction: 'Lançamento', installment: 'Parcelamento', recurring: 'Recorrência', budget: 'Orçamento', goal: 'Meta', card: 'Cartão' };
+function completeBody() {
+  const records = filterReport(reportRecords(state), reportFilter);
+  const totals = reportTotals(records);
+  const trend = reportTrend(records);
+  const max = Math.max(1, ...trend.flatMap(item => [item.income, item.expense]));
+  const pages = Math.max(1, Math.ceil(records.length / 12)); reportFilter.page = Math.min(reportFilter.page, pages);
+  const shown = records.slice((reportFilter.page - 1) * 12, reportFilter.page * 12);
+  const kindCount = Object.entries(reportKinds).map(([key, label]) => { const count = records.filter(item => item.kind === key).length; return `<span><strong>${count}</strong> ${count === 1 ? label.toLowerCase() : { transaction: 'lançamentos', installment: 'parcelamentos', recurring: 'recorrências', budget: 'orçamentos', goal: 'metas', card: 'cartões' }[key]}</span>`; }).join('');
+  return `<section class="complete-stats" aria-label="Resumo de todos os registros"><article><span>Receitas recebidas</span><strong>${money(totals.income)}</strong><small>Todos os lançamentos efetivados no período</small></article><article><span>Despesas pagas</span><strong>${money(totals.expense)}</strong><small>Todos os lançamentos efetivados no período</small></article><article><span>Resultado realizado</span><strong class="${totals.income - totals.expense < 0 ? 'negative' : ''}">${money(totals.income - totals.expense)}</strong><small>Recebido menos pago</small></article><article><span>A receber / a pagar</span><strong>${money(totals.receivable)} <em>/</em> ${money(totals.payable)}</strong><small>Lançamentos ainda pendentes</small></article></section><div class="complete-insights"><section class="panel complete-chart"><div class="panel-heading"><div><h2>Fluxo de todos os meses</h2><p>Receitas e despesas efetivadas, por mês com lançamentos</p></div><div class="complete-legend"><span>● Receitas</span><span>● Despesas</span></div></div>${trend.length ? `<div class="complete-chart-scroll"><div class="complete-chart-bars" style="--points:${trend.length}" role="img" aria-label="${escape(trend.map(item => `${monthName(item.month)}: receitas ${money(item.income)}, despesas ${money(item.expense)}`).join('; '))}">${trend.map(item => `<div class="complete-chart-month"><div class="complete-bar-pair"><i class="complete-bar income" style="height:${Math.max(item.income ? 2 : 0, item.income / max * 100)}%" title="Receitas: ${money(item.income)}"></i><i class="complete-bar expense" style="height:${Math.max(item.expense ? 2 : 0, item.expense / max * 100)}%" title="Despesas: ${money(item.expense)}"></i></div><span>${escape(item.month.slice(5) + '/' + item.month.slice(2, 4))}</span></div>`).join('')}</div></div>` : empty('Sem fluxo no período', 'Os lançamentos recebidos e pagos formarão este gráfico.')}</section><section class="panel complete-commitments"><h2>Outros compromissos</h2><p>Valores cadastrados separadamente dos lançamentos. Não entram no resultado realizado acima.</p><div><span>Total de compras parceladas</span><strong>${money(totals.installments)}</strong></div><div><span>Contas recorrentes por mês</span><strong>${money(totals.recurringMonthly)}</strong></div><div><span>Guardado em metas</span><strong>${money(totals.goalsSaved)}</strong></div><div><span>Cartões cadastrados</span><strong>${records.filter(item => item.kind === 'card').length}</strong></div></section></div><section class="panel complete-list"><div class="panel-heading"><div><h2>Todos os registros</h2><p>${records.length} ${records.length === 1 ? 'item encontrado' : 'itens encontrados'}. Cartões e contas contínuas aparecem uma vez; não são duplicados a cada mês.</p></div></div><div class="complete-kind-count">${kindCount}</div>${shown.length ? `<div class="table-wrap"><table><thead><tr><th>REGISTRO</th><th>TIPO</th><th>DATA / INÍCIO</th><th>CATEGORIA</th><th>VALOR</th></tr></thead><tbody>${shown.map(item => `<tr><td><strong>${escape(item.label)}</strong><small class="table-note">${escape(item.detail)}${item.kind === 'goal' ? ` · guardado ${money(item.savedAmount)}` : ''}</small></td><td><span class="tag">${reportKinds[item.kind]}</span></td><td>${item.date ? dateLabel(item.date) : '—'}</td><td>${escape(item.category)}</td><td class="amount">${item.amount === null ? '—' : money(item.amount)}</td></tr>`).join('')}</tbody></table></div>` : empty('Nenhum registro encontrado', 'Remova os filtros ou cadastre um novo item.') }<div class="table-footer"><span>Página ${reportFilter.page} de ${pages}</span><div class="pagination"><button class="secondary" data-action="report-previous" ${reportFilter.page === 1 ? 'disabled' : ''} aria-label="Página anterior">‹</button><button class="secondary" data-action="report-next" ${reportFilter.page === pages ? 'disabled' : ''} aria-label="Próxima página">›</button></div></div></section>`;
+}
+function renderComplete() {
+  return `<section class="complete-intro"><div><p class="eyebrow">SEU PANORAMA FINANCEIRO</p><h2>Uma visão de tudo</h2><p>Os dados aparecem completos. Use os filtros apenas para investigar uma parte.</p></div><span>${state.transactions.length} lançamentos · ${state.installments.length + state.recurringExpenses.length} compromissos</span></section><div class="complete-filters"><label>Buscar<input id="report-search" placeholder="Descrição, categoria ou detalhe" value="${escape(reportFilter.search)}"></label><label>Tipo<select id="report-kind"><option value="">Todos os tipos</option>${Object.entries(reportKinds).map(([key, label]) => `<option value="${key}" ${reportFilter.kind === key ? 'selected' : ''}>${label}</option>`).join('')}</select></label><label>De<input id="report-from" type="date" min="1900-01-01" max="9999-12-31" value="${reportFilter.from}"></label><label>Até<input id="report-to" type="date" min="1900-01-01" max="9999-12-31" value="${reportFilter.to}"></label><button class="secondary" data-action="report-clear">Limpar filtros</button></div><div id="complete-results">${completeBody()}</div>`;
+}
 function filteredRows() {
   const text = filter.search.toLocaleLowerCase('pt-BR');
   return [...viewedMonthly()].sort((a,b) => (filter.view === 'purchase' ? (b.purchaseDate || b.date).localeCompare(a.purchaseDate || a.date) : b.date.localeCompare(a.date)) || a.description.localeCompare(b.description)).filter(t => (!filter.type || t.type === filter.type) && (!filter.status || t.status === filter.status) && (!filter.category || t.category === filter.category) && (!filter.paymentMethod || t.paymentMethod === filter.paymentMethod) && (t.description.toLocaleLowerCase('pt-BR').includes(text) || t.notes.toLocaleLowerCase('pt-BR').includes(text)));
@@ -186,12 +203,12 @@ function render() {
   page = Object.hasOwn(titles, location.hash.slice(1)) ? location.hash.slice(1) : 'overview';
   $('#page-title').textContent = titles[page][0]; $('#breadcrumb').textContent = titles[page][0]; $('#page-description').textContent = titles[page][1];
   document.title = `${titles[page][0]} · Nexora`;
-  $('#month-label').textContent = monthName(month);
-  $('#month-trigger').closest('.month-picker-wrap').hidden = page === 'cards' || page === 'calendar';
+  $('#month-label').textContent = monthName(month).replace(/^./, letter => letter.toUpperCase());
+  $('#month-trigger').hidden = page === 'cards' || page === 'calendar' || page === 'complete';
   document.querySelectorAll('[data-page]').forEach(a => { a.classList.toggle('active', a.dataset.page === page); if (a.dataset.page === page) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
   $('#demo-banner').hidden = !demo;
   if (!state) return;
-  $('#page-content').innerHTML = ({ overview: renderOverview, transactions: renderTransactions, cards: renderCards, calendar: renderCalendar, budgets: renderBudgets, installments: renderInstallments, goals: renderGoals, categories: renderCategories, admin: renderAdmin, settings: renderSettings })[page]();
+  $('#page-content').innerHTML = ({ overview: renderOverview, complete: renderComplete, transactions: renderTransactions, cards: renderCards, calendar: renderCalendar, budgets: renderBudgets, installments: renderInstallments, goals: renderGoals, categories: renderCategories, admin: renderAdmin, settings: renderSettings })[page]();
   if (page === 'transactions') for (const key of ['type', 'status', 'category', 'paymentMethod', 'view']) $(`#filter-${key}`).value = filter[key];
 }
 
@@ -350,9 +367,8 @@ function startDemo() {
 }
 
 // 4. Eventos do usuário, agrupados para facilitar a leitura.
-$('#month').value = month;
-$('#month-trigger').addEventListener('click', () => { const picker = $('#month'); if (typeof picker.showPicker === 'function') picker.showPicker(); else picker.click(); });
-$('#month').addEventListener('change', event => { if (!event.target.value || !event.target.validity.valid) { event.target.value = month; return; } month = event.target.value; filter.page = 1; render(); });
+$('#month-trigger').addEventListener('click', () => { const form = $('#month-form'); form.elements.month.value = month.slice(5); form.elements.year.value = month.slice(0, 4); $('#month-dialog').showModal(); form.elements.month.focus(); });
+$('#month-form').addEventListener('submit', event => { event.preventDefault(); const form = event.currentTarget; if (!form.reportValidity()) return; month = `${form.elements.year.value.padStart(4, '0')}-${form.elements.month.value}`; filter.page = 1; $('#month-dialog').close(); render(); });
 window.addEventListener('hashchange', render);
 $('#new-transaction').addEventListener('click', () => openTransaction());
 $('#transaction-form').addEventListener('change', event => {
@@ -423,8 +439,11 @@ $('#user-form').addEventListener('submit', async event => {
 });
 $('#page-content').addEventListener('input', event => {
   if (event.target.id === 'search') { filter.search = event.target.value; filter.page = 1; $('#transactions-result').innerHTML = transactionsResult(); }
+  if (event.target.id === 'report-search') { reportFilter.search = event.target.value; reportFilter.page = 1; $('#complete-results').innerHTML = completeBody(); }
 });
 $('#page-content').addEventListener('change', async event => {
+  const reportKey = { 'report-kind': 'kind', 'report-from': 'from', 'report-to': 'to' }[event.target.id];
+  if (reportKey) { reportFilter[reportKey] = event.target.value; reportFilter.page = 1; $('#complete-results').innerHTML = completeBody(); }
   const key = event.target.id.replace('filter-', '');
   if (['type', 'status', 'category', 'paymentMethod', 'view'].includes(key)) { filter[key] = event.target.value; filter.page = 1; if (key === 'view') render(); else $('#transactions-result').innerHTML = transactionsResult(); }
   if (event.target.id === 'backup-file' && event.target.files[0] && ensureReal()) {
@@ -458,6 +477,8 @@ $('#page-content').addEventListener('click', async event => {
   if (action === 'reload-users') { adminUsers = null; return render(); }
   if (action === 'demo') return startDemo();
   if (action === 'csv') return exportCsv();
+  if (action === 'report-clear') { reportFilter = { search: '', kind: '', from: '', to: '', page: 1 }; return render(); }
+  if (action === 'report-previous' || action === 'report-next') { reportFilter.page += action === 'report-next' ? 1 : -1; $('#complete-results').innerHTML = completeBody(); return; }
   if (action === 'previous' || action === 'next') { filter.page += action === 'next' ? 1 : -1; $('#transactions-result').innerHTML = transactionsResult(); return; }
   if (!ensureReal()) return;
   button.disabled = true;

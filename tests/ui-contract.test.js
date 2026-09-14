@@ -9,7 +9,7 @@ test('navegação e diálogos expõem IDs únicos e destinos renderizados', () =
   const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]);
   assert.equal(new Set(ids).size, ids.length);
   for (const page of [...html.matchAll(/data-page="([^"]+)"/g)].map(match => match[1])) assert.match(app, new RegExp(`^  ${page}: \\[`, 'm'));
-  for (const id of ['transaction-dialog', 'card-dialog', 'settle-dialog', 'goal-dialog', 'confirm-dialog']) assert(ids.includes(id));
+  for (const id of ['transaction-dialog', 'card-dialog', 'settle-dialog', 'goal-dialog', 'month-dialog', 'confirm-dialog']) assert(ids.includes(id));
 });
 
 test('campos visíveis de data possuem limites e formulários novos têm ações', () => {
@@ -19,4 +19,6 @@ test('campos visíveis de data possuem limites e formulários novos têm ações
   }
   for (const id of ['transaction-form', 'card-form', 'settle-form']) assert.match(app, new RegExp(`\\$\\('#${id}'\\)\\.addEventListener\\('submit'`));
   for (const action of ['new-card', 'edit-card', 'delete-card', 'settle']) assert.match(app, new RegExp(`action === '${action}'`));
+  assert.match(app, /\$\('#month-trigger'\)\.addEventListener\('click'/);
+  assert.match(app, /\$\('#month-form'\)\.addEventListener\('submit'/);
 });

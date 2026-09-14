@@ -23,6 +23,8 @@ Abra **http://127.0.0.1:3000**. Não precisa executar `npm install`. O comando `
 7. Em **Orçamentos**, defina limites por categoria para o mês. Eles consideram despesas pagas **e pendentes**.
 8. Em **Dados e backup**, exporte CSV, baixe um backup JSON ou restaure uma cópia. No celular, o acesso está no rodapé do quadro de últimos lançamentos da Visão geral.
 
+O **Painel completo** reúne todos os lançamentos, cartões, parcelamentos, contas recorrentes, orçamentos e metas em uma listagem paginada. Ele abre sem filtro de mês; busca, tipo e datas são opcionais. O gráfico de fluxo mostra todos os meses que têm lançamentos. Compras parceladas aparecem pelo valor total, e contas recorrentes aparecem uma vez pelo valor mensal, para não criar infinitos registros virtuais. Esses compromissos ficam separados do resultado de receitas e despesas efetivadas.
+
 O saldo acumulado soma receitas menos despesas efetivadas até o último dia do mês selecionado. Não é um saldo consultado em banco. Para começar com um saldo que já possui, registre uma receita chamada “Saldo inicial” (ou despesa, se negativo), datada antes do mês que deseja acompanhar.
 
 A projeção até o fim do mês combina transações efetivadas, pendências e compromissos de parcelas/recorrências. Se a mesma parcela ou recorrência for cadastrada também como transação, haverá dupla contagem. As reservas informadas em Metas são subtraídas apenas do valor disponível estimado; não alteram o saldo de caixa automaticamente.
@@ -40,6 +42,7 @@ Leia os arquivos nesta ordem:
 | `public/index.html` | HTML semântico, navegação, campos e modais nativos |
 | `public/styles.css` | Cores, flexbox, grid e responsividade |
 | `public/finance.js` | Funções puras; cálculos em centavos evitam erros decimais |
+| `public/report.js` | Consolidação, filtros e agrupamento dos registros do Painel completo |
 | `public/app.js` | Estado da interface, renderização, eventos e formulários |
 | `public/api.js` | `fetch`, JSON, requisições e erros |
 | `server/server.js` | HTTP e rotas, usando módulos nativos do Node |
@@ -59,7 +62,7 @@ Execute [supabase/schema.sql](supabase/schema.sql) uma vez no SQL Editor do proj
 
 Os dados financeiros não ficam no `localStorage`; somente access token, refresh token e UID da sessão são guardados ali. Cada linha financeira pertence a um usuário. O repositório não mantém cache compartilhado e usa atualização condicional para evitar que requisições concorrentes apaguem alterações umas das outras.
 
-O cadastro público deve permanecer desabilitado no Supabase. Crie usuários manualmente em Authentication > Users. A aplicação oferece apenas login e logout.
+O cadastro público deve permanecer desabilitado no Supabase. Administradores podem criar e gerenciar usuários na área **Usuários**; os demais usuários acessam somente seus próprios dados.
 
 ## Render
 
